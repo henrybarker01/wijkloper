@@ -1,0 +1,31 @@
+# Runs the Wijkloper API next to an existing reverse proxy on a Docker host.
+#
+#   cp .env.example .env      # then set the pairing code (and PIN) in .env
+#   docker compose up -d --build
+#
+# The API is NOT published on a host port; the proxy reaches it over the shared
+# Docker network as http://wijkloper:8000. Set PROXY_NETWORK in .env to the name
+# of the network your proxy (Caddy, Traefik, nginx) is attached to.
+services:
+  wijkloper:
+    build: .
+    image: wijkloper-api:latest
+    container_name: wijkloper
+    restart: unless-stopped
+    environment:
+      WIJKLOPER_FAMILY_NAME: ${WIJKLOPER_FAMILY_NAME:-Our family}
+      WIJKLOPER_PAIRING_CODE: ${WIJKLOPER_PAIRING_CODE:?set WIJKLOPER_PAIRING_CODE in .env}
+      WIJKLOPER_PARENT_PIN: ${WIJKLOPER_PARENT_PIN:-1234}
+      WIJKLOPER_ENABLE_DOCS: ${WIJKLOPER_ENABLE_DOCS:-1}
+    volumes:
+      - wijkloper-data:/data
+    networks:
+      - proxy
+
+volumes:
+  wijkloper-data:
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}

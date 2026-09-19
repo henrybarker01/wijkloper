@@ -1,0 +1,5 @@
+package nl.wijkloper
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()

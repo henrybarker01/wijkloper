@@ -1,0 +1,35 @@
+name: wijkloper
+description: "Wijkloper: paper route helper for kids and parents"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.4.3
+  http: ^1.6.0
+  intl: ^0.20.3
+  path_provider: ^2.1.6
+  shared_preferences: ^2.5.5
+  uuid: ^4.6.0
+  wakelock_plus: ^1.8.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#0E7490"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  min_sdk_android: 21
