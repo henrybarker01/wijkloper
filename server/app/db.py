@@ -135,6 +135,22 @@ def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def app_timezone() -> dt.tzinfo:
+    """Family's time zone (WIJKLOPER_TZ); servers often run in UTC."""
+    name = os.environ.get("WIJKLOPER_TZ", "Europe/Amsterdam")
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(name)
+    except Exception:  # unknown zone name or no zone data available
+        return dt.timezone.utc
+
+
+def today_local() -> dt.date:
+    """Today's date where the kids live, not where the server runs."""
+    return dt.datetime.now(app_timezone()).date()
+
+
 def connect() -> sqlite3.Connection:
     os.makedirs(data_dir(), exist_ok=True)
     conn = sqlite3.connect(db_path(), timeout=10)

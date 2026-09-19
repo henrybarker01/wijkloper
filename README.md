@@ -6,8 +6,11 @@ streets, house numbers and papers from any phone in the family.
 
 ```
 app/      Flutter app (Android)        — kids + parent mode
-server/   FastAPI + SQLite service     — runs on the Raspberry Pi at home
+server/   FastAPI + SQLite service     — runs in Docker behind Caddy on the Lightsail box
+dist/     built APKs for sharing (not in git)
 ```
+
+Live server: **https://wijkloper.aeromech.co** (the app connects there by default).
 
 ## How it works
 
@@ -21,28 +24,36 @@ server/   FastAPI + SQLite service     — runs on the Raspberry Pi at home
   (Barnevelder + Folders, Barnevelder only, De Week); normal days just show numbers.
 * Kids start the timer, tap houses as they deliver, and get a personal-best
   comparison, streak and family leaderboard when they finish.
-* Phones keep a copy of the route and of finished runs, so everything works out
-  on the street without Wi-Fi. Runs upload automatically when back home.
+* Phones keep a copy of the route and of finished runs, so everything works
+  without a connection. Runs upload the moment the phone is online again.
 
-## First-time setup
+## Putting it on a phone
 
-1. **Server on the Pi** — see [server/README.md](server/README.md). In short:
-   `scp -r server pi@<pi-ip>:~/wijkloper-server` then
-   `ssh pi@<pi-ip> "sudo bash ~/wijkloper-server/install.sh"`. The script prints
-   the server URL and the family pairing code. Parent PIN starts as `1234`.
-2. **Install the app** on each phone: build with `flutter build apk --release`
-   in `app/` and copy `app/build/app/outputs/flutter-apk/app-release.apk` to the
-   phone (or `flutter install` with the phone on USB).
-3. **Pair each phone**: open the app on the home Wi-Fi → *Search on this Wi-Fi* →
-   enter the pairing code.
-4. **Parent mode** (lock icon, PIN): add the kids, check the papers and their
-   days, add streets in walking order, add house numbers (e.g. 1–60, odd/even)
-   and pick what they get. Select several houses at once to give or remove a paper.
+1. Build: in `app/` run `flutter build apk --release --split-per-abi`. Use
+   `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (fits practically
+   every phone from the last ~8 years; `app-release.apk` is the universal fallback).
+2. Get the file onto the phone: share it via Google Drive / WhatsApp / USB, open it
+   on the phone, and allow "install unknown apps" for that app when Android asks.
+3. Open Wijkloper. It shows `wijkloper.aeromech.co` and the family name. Type the
+   **family code** (set in `server/.env` on the server) and a name for the phone,
+   tap **Pair this phone**.
+4. A parent taps the lock icon, enters the **parent PIN**, and adds the kids,
+   checks the papers and their weekdays, adds streets in walking order and house
+   numbers (ranges like 1–60, odd/even), and picks what each house gets. Select
+   several houses at once to give or remove a paper.
+
+Updating the app later: build again, share the new APK, install over the old one.
+Phone data (pairing, cached route) is kept.
+
+## Server
+
+See [server/README.md](server/README.md) for hosting (Docker + Caddy on the
+Lightsail instance), updating, the access model and the home-network alternative.
 
 ## Development
 
-```bash
-# server (Windows PowerShell)
+```powershell
+# server
 cd server; python -m venv .venv; .venv\Scripts\pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest -q
 $env:WIJKLOPER_DATA_DIR="$PWD\data"; $env:WIJKLOPER_PAIRING_CODE="123456"
@@ -52,5 +63,6 @@ $env:WIJKLOPER_DATA_DIR="$PWD\data"; $env:WIJKLOPER_PAIRING_CODE="123456"
 cd app; flutter pub get; flutter test; flutter run
 ```
 
-The Android emulator reaches a server on this PC at `http://10.0.2.2:8000`.
-Real phones use the Pi's LAN address, e.g. `http://192.168.178.240:8000`.
+To point a development build at a local server use the app's "Use a different
+server" option (the Android emulator reaches this PC at `http://10.0.2.2:8000`),
+or build with `--dart-define=WIJKLOPER_DEFAULT_SERVER=http://10.0.2.2:8000`.

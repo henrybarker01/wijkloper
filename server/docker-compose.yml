@@ -17,6 +17,7 @@ services:
       WIJKLOPER_PAIRING_CODE: ${WIJKLOPER_PAIRING_CODE:?set WIJKLOPER_PAIRING_CODE in .env}
       WIJKLOPER_PARENT_PIN: ${WIJKLOPER_PARENT_PIN:-1234}
       WIJKLOPER_ENABLE_DOCS: ${WIJKLOPER_ENABLE_DOCS:-1}
+      WIJKLOPER_TZ: ${WIJKLOPER_TZ:-Europe/Amsterdam}
     volumes:
       - wijkloper-data:/data
     networks:

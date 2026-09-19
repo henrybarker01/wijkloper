@@ -1,34 +1,83 @@
 # Wijkloper server
 
 Small FastAPI + SQLite service that holds the family's paper route and the kids'
-delivery runs. Runs on a Raspberry Pi on the home network; phones sync with it
-when they are on the same Wi-Fi.
+delivery runs. In production it runs as a Docker container on the Lightsail
+instance, behind the Caddy reverse proxy that already serves the other sites.
+Caddy terminates TLS (Let's Encrypt, renewed automatically) and forwards
+`https://wijkloper.aeromech.co` to the container on the shared Docker network.
 
-## Install / update on the Pi
+## Hosting on the Lightsail box (what is set up)
 
-From this PC:
+All commands run in the Lightsail browser terminal as `ubuntu`.
+
+1. **Code**: the GitHub repo is cloned at `~/wijkloper`. The server has a
+   read-only deploy key (`~/.ssh/wijkloper_deploy`) registered on the repo.
+2. **Settings**: `~/wijkloper/server/.env` (not in git) holds
+   `WIJKLOPER_FAMILY_NAME`, `WIJKLOPER_PAIRING_CODE`, `WIJKLOPER_PARENT_PIN`,
+   `WIJKLOPER_ENABLE_DOCS`, `WIJKLOPER_TZ` and `PROXY_NETWORK=aeromechui_default`.
+   Code and PIN are only read on the very first start; afterwards they live in
+   the database and are changed from the app (Parent mode › Settings).
+3. **Container**: `cd ~/wijkloper/server && docker compose up -d --build` builds
+   the image and starts the `wijkloper` container on the `aeromechui_default`
+   network. The database lives in the named volume `server_wijkloper-data`.
+4. **Proxy**: `/home/ubuntu/AeroMechUI/Caddyfile` has the block
+
+   ```
+   wijkloper.aeromech.co {
+           reverse_proxy wijkloper:8000
+   }
+   ```
+
+   After editing that file: `docker exec aeromechui-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
+
+Useful commands:
 
 ```bash
-scp -r server pi@<pi-ip>:~/wijkloper-server
-ssh pi@<pi-ip> "sudo bash ~/wijkloper-server/install.sh"
+cd ~/wijkloper/server
+docker compose ps                    # should say "Up ... (healthy)"
+docker compose logs --tail 50 -f     # live API log
+docker compose exec wijkloper python -m app.cli show        # family name, pairing code, counts
+docker compose exec wijkloper python -m app.cli set-pin 4321
+docker compose exec wijkloper python -m app.cli set-code 24681357
+docker logs --tail 30 aeromechui-caddy-1                     # certificate / proxy log
 ```
 
-The script installs to `/opt/wijkloper`, keeps the database in
-`/var/lib/wijkloper/wijkloper.db`, and registers the `wijkloper` systemd
-service on port 8000. Re-run it to deploy a newer version; data is kept.
+## Updating the server
 
-Useful commands on the Pi:
+On the PC: commit and push. On the server:
 
 ```bash
-sudo wijkloper-cli show            # family name, pairing code, counts
-sudo wijkloper-cli set-pin 4321    # reset the parent PIN
-sudo wijkloper-cli set-code 246810 # change the pairing code
-journalctl -u wijkloper -f         # live logs
-sudo systemctl restart wijkloper
+cd ~/wijkloper && git pull && cd server && docker compose up -d --build
 ```
 
-Backup: copy `/var/lib/wijkloper/wijkloper.db` somewhere safe now and then
-(`sqlite3 wijkloper.db ".backup backup.db"` for a consistent copy).
+The data volume is untouched by updates.
+
+## Backup
+
+The whole state is one SQLite file inside the volume:
+
+```bash
+docker compose exec wijkloper python -c "import sqlite3; sqlite3.connect('/data/wijkloper.db').backup(sqlite3.connect('/data/backup.db'))"
+docker cp wijkloper:/data/backup.db ~/wijkloper-backup-$(date +%F).db
+```
+
+## Security notes
+
+* Only Caddy is reachable from the internet; the API port 8000 is not published.
+* Every request except `/api/health` and `/api/pair` needs a device token that a
+  phone obtains once with the family pairing code. Parent actions need a 12-hour
+  parent token obtained with the PIN.
+* Wrong pairing codes and PINs are slowed down (1 s) and locked out per IP after
+  5 failures for 15 minutes. Prefer an 8-digit pairing code.
+* `WIJKLOPER_ENABLE_DOCS=0` hides the interactive API docs.
+* A phone can be revoked in Parent mode › Settings › Paired phones.
+
+## Home-network alternative (Raspberry Pi, plain http)
+
+`sudo bash install.sh` installs the API as a systemd service on port 8000 with
+data in `/var/lib/wijkloper`. `sudo bash install.sh --domain example.org`
+additionally installs Caddy on the host for HTTPS. In the app choose "Use a
+different server" › "Search on this Wi-Fi".
 
 ## Run locally (Windows) for development
 
@@ -46,7 +95,7 @@ Tests: `.venv\Scripts\python -m pytest -q`
 
 | Step | Who | What |
 | --- | --- | --- |
-| `POST /api/pair` | any phone on the LAN | sends the 6-digit family pairing code, receives a device token |
+| `POST /api/pair` | any phone | sends the family pairing code, receives a device token |
 | `Authorization: Bearer <token>` | paired phone | read config, upload runs, read stats |
 | `POST /api/parent/login` | parent | sends the PIN, receives a 12-hour parent token |
 | `X-Parent-Token` | parent | everything under `/api/admin/*` |

@@ -7,3 +7,6 @@ Thumbs.db
 
 # Local scratch
 *.log
+
+# Built APKs for sharing
+dist/

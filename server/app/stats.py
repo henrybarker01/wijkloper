@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional, Set
 
-from .db import days_to_list
+from .db import days_to_list, today_local
 
 
 def run_to_dict(r: sqlite3.Row) -> Dict[str, Any]:
@@ -109,7 +109,7 @@ def _summary(runs: List[Dict[str, Any]], scheduled: Set[int], today: dt.date) ->
 
 
 def compute_stats(db: sqlite3.Connection, kid_id: Optional[int]) -> Dict[str, Any]:
-    today = dt.date.today()
+    today = today_local()
     scheduled = scheduled_weekdays(db)
     result: Dict[str, Any] = {
         "kid_id": kid_id,
