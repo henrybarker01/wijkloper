@@ -14,3 +14,7 @@ dist/
 # Portal credentials and probe output (never commit)
 tools/.env
 tools/out/
+
+# Python caches
+__pycache__/
+*.pyc
