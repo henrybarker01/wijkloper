@@ -187,7 +187,11 @@ def main() -> int:
             print(f"  district {args.district} -> id {district_id}")
             if district_id:
                 for label, url in [
-                    ("street_list", f"{API}courierdistrict/{district_id}/StreetList"),
+                    # This one backs the Looplijst popup: every distribution order
+                    # for the courier, each with its addresses.
+                    ("distribution_order_districts", f"{API}DistributionOrderDistricts"),
+                    # The full address list of the district (the Stratenlijst button).
+                    ("street_list", f"{API}District/{district_id}/StreetList"),
                     ("walkdates", f"{API}districts/walkdates?districtId={district_id}&courierId={courier_id}"),
                 ]:
                     try:

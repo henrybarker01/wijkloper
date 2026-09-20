@@ -16,6 +16,10 @@ in ``app/sources/`` and this module never has to know about it:
       ]
     }
 
+An entry in ``products`` is either a plain name (the house gets it on the
+product's usual weekdays) or ``{"name": ..., "days": [6]}`` for a house that
+only gets it on some of them, such as the Saturday-only subscribers.
+
 ``covers_products`` is what makes a partial list safe: the importer only ever
 adds or removes assignments for the products the payload actually covers, and
 only inside the streets it lists. A Monday list that contains no De Week
@@ -32,7 +36,7 @@ import re
 import sqlite3
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from .db import bump_config_version, get_setting, now_iso
+from .db import bump_config_version, days_from_list, get_setting, now_iso
 
 # A source list that would strip out more than this share of the covered
 # assignments is treated as a broken feed rather than a real change. The guard
@@ -45,6 +49,8 @@ DEFAULT_MIN_REMOVALS_BEFORE_GUARD = 8
 PRODUCT_MAP_KEY = "import_product_map"
 
 AddressKey = Tuple[int, str]  # (number, suffix)
+# product id -> days CSV ("6") or None meaning "the product's usual days"
+Assignment = Dict[int, Optional[str]]
 
 
 class ImportError_(ValueError):
@@ -97,12 +103,30 @@ def _resolve_products(
     return resolved
 
 
+def _parse_products(entries: Any, resolved: Dict[str, int], where: str) -> Assignment:
+    """[{"name": .., "days": [..]} | "name"] -> {product id: days CSV or None}."""
+    out: Assignment = {}
+    for entry in entries or []:
+        if isinstance(entry, str):
+            name, days = entry, None
+        elif isinstance(entry, dict):
+            name = str(entry.get("name") or "")
+            days = entry.get("days")
+        else:
+            raise ImportError_(f"Unreadable product entry for {where}: {entry!r}")
+        product_id = resolved.get(name)
+        if product_id is None:
+            continue  # not a covered product; ignored on purpose
+        out[product_id] = days_from_list([int(d) for d in days]) if days else None
+    return out
+
+
 def _desired_state(
     payload: Dict[str, Any], resolved: Dict[str, int]
-) -> Tuple[Dict[str, str], Dict[str, Dict[AddressKey, Set[int]]], Dict[str, List[AddressKey]]]:
-    """Returns (display names, street -> address -> product ids, street -> order)."""
+) -> Tuple[Dict[str, str], Dict[str, Dict[AddressKey, Assignment]], Dict[str, List[AddressKey]]]:
+    """Returns (display names, street -> address -> assignment, street -> order)."""
     display: Dict[str, str] = {}
-    wanted: Dict[str, Dict[AddressKey, Set[int]]] = {}
+    wanted: Dict[str, Dict[AddressKey, Assignment]] = {}
     order: Dict[str, List[AddressKey]] = {}
     for street in payload.get("streets") or []:
         raw_name = str(street.get("name") or "").strip()
@@ -118,15 +142,13 @@ def _desired_state(
             except (KeyError, TypeError, ValueError):
                 raise ImportError_(f"A house in {raw_name} has no usable number: {address!r}") from None
             address_key: AddressKey = (number, _clean_suffix(address.get("suffix")))
-            products = {
-                resolved[name]
-                for name in (address.get("products") or [])
-                if name in resolved
-            }
+            assignment = _parse_products(
+                address.get("products"), resolved, f"{raw_name} {number}"
+            )
             if address_key in bucket:
-                bucket[address_key] |= products
+                bucket[address_key].update(assignment)
             else:
-                bucket[address_key] = products
+                bucket[address_key] = assignment
                 sequence.append(address_key)
     return display, wanted, order
 
@@ -173,41 +195,49 @@ def apply_import(
         normalise_street(r["name"]): r
         for r in db.execute("SELECT * FROM streets WHERE route_id=?", (route_id,))
     }
-    current: Dict[str, Dict[AddressKey, Set[int]]] = {}
+    current: Dict[str, Dict[AddressKey, Assignment]] = {}
     address_ids: Dict[str, Dict[AddressKey, int]] = {}
     for key, street in streets.items():
         if key not in wanted:
             continue
-        bucket: Dict[AddressKey, Set[int]] = {}
+        bucket: Dict[AddressKey, Assignment] = {}
         ids: Dict[AddressKey, int] = {}
         for addr in db.execute("SELECT * FROM addresses WHERE street_id=?", (street["id"],)):
             address_key = (addr["number"], _clean_suffix(addr["suffix"]))
             ids[address_key] = addr["id"]
             bucket[address_key] = {
-                r["product_id"]
+                r["product_id"]: r["days"]
                 for r in db.execute(
-                    "SELECT product_id FROM address_products WHERE address_id=?", (addr["id"],)
+                    "SELECT product_id, days FROM address_products WHERE address_id=?", (addr["id"],)
                 )
-            } & covered_ids
+                if r["product_id"] in covered_ids
+            }
         current[key] = bucket
         address_ids[key] = ids
 
     # --- diff
     new_streets = [display[k] for k in wanted if k not in streets]
     added: List[str] = []
+    changed: List[str] = []
     removed: List[str] = []
     for key, houses in wanted.items():
         have = current.get(key, {})
-        for address_key, products in houses.items():
-            gained = products - have.get(address_key, set())
-            if gained:
-                added.append(f"{display[key]} {address_key[0]}{address_key[1]}")
-        for address_key, products in have.items():
-            lost = products - wanted[key].get(address_key, set())
-            if lost:
-                removed.append(f"{display[key]} {address_key[0]}{address_key[1]}")
+        for address_key, assignment in houses.items():
+            label = f"{display[key]} {address_key[0]}{address_key[1]}"
+            existing = have.get(address_key, {})
+            for product_id, days in assignment.items():
+                if product_id not in existing:
+                    added.append(label)
+                elif existing[product_id] != days:
+                    changed.append(f"{label} ({existing[product_id] or 'usual days'} -> {days or 'usual days'})")
+        for address_key, existing in have.items():
+            label = f"{display[key]} {address_key[0]}{address_key[1]}"
+            want = houses.get(address_key, {})
+            for product_id in existing:
+                if product_id not in want:
+                    removed.append(label)
 
-    covered_now = sum(1 for houses in current.values() for p in houses.values() if p)
+    covered_now = sum(len(a) for houses in current.values() for a in houses.values())
     ratio = (len(removed) / covered_now) if covered_now else 0.0
     report: Dict[str, Any] = {
         "source": payload.get("source", "unknown"),
@@ -220,11 +250,13 @@ def apply_import(
             "houses_in_source": sum(len(h) for h in wanted.values()),
             "new_streets": len(new_streets),
             "added": len(added),
+            "changed": len(changed),
             "removed": len(removed),
-            "unchanged": max(0, covered_now - len(removed)),
+            "unchanged": max(0, covered_now - len(removed) - len(changed)),
         },
         "new_streets": new_streets,
         "added": sorted(added),
+        "changed": sorted(changed),
         "removed": sorted(removed),
         "remove_ratio": round(ratio, 3),
         "applied": False,
@@ -270,7 +302,7 @@ def apply_import(
         ).fetchone()["n"]
 
         for address_key in order[key]:
-            products = houses[address_key]
+            assignment = houses[address_key]
             address_id = existing_ids.get(address_key)
             if address_id is None:
                 cur = db.execute(
@@ -279,21 +311,22 @@ def apply_import(
                 )
                 address_id = cur.lastrowid
                 next_order += 1
-            for product_id in products:
+            for product_id, days in assignment.items():
                 db.execute(
-                    "INSERT INTO address_products(address_id, product_id, days) VALUES (?,?,NULL) "
-                    "ON CONFLICT(address_id, product_id) DO NOTHING",
-                    (address_id, product_id),
+                    "INSERT INTO address_products(address_id, product_id, days) VALUES (?,?,?) "
+                    "ON CONFLICT(address_id, product_id) DO UPDATE SET days=excluded.days",
+                    (address_id, product_id, days),
                 )
 
         # Stop delivering covered products to houses the source no longer lists.
-        for address_key, products in current.get(key, {}).items():
-            gone = products - houses.get(address_key, set())
-            for product_id in gone:
-                db.execute(
-                    "DELETE FROM address_products WHERE address_id=? AND product_id=?",
-                    (existing_ids[address_key], product_id),
-                )
+        for address_key, existing in current.get(key, {}).items():
+            want = houses.get(address_key, {})
+            for product_id in existing:
+                if product_id not in want:
+                    db.execute(
+                        "DELETE FROM address_products WHERE address_id=? AND product_id=?",
+                        (existing_ids[address_key], product_id),
+                    )
 
     report["applied"] = True
     report["version"] = bump_config_version(db)
@@ -305,7 +338,7 @@ def _record(db: sqlite3.Connection, report: Dict[str, Any], *, commit: bool) -> 
     counts = report["counts"]
     summary = (
         f"{counts['added']} added, {counts['removed']} stopped, "
-        f"{counts['new_streets']} new streets"
+        f"{counts.get('changed', 0)} day changes, {counts['new_streets']} new streets"
     )
     if not report["ok"]:
         summary = "refused: " + str(report.get("error", ""))[:160]

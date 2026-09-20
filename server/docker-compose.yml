@@ -18,6 +18,12 @@ services:
       WIJKLOPER_PARENT_PIN: ${WIJKLOPER_PARENT_PIN:-1234}
       WIJKLOPER_ENABLE_DOCS: ${WIJKLOPER_ENABLE_DOCS:-1}
       WIJKLOPER_TZ: ${WIJKLOPER_TZ:-Europe/Amsterdam}
+      # Only used by the nightly `app.cli sync-spreadit` job; the API itself
+      # never touches the portal.
+      SPREADIT_USERNAME: ${SPREADIT_USERNAME:-}
+      SPREADIT_PASSWORD: ${SPREADIT_PASSWORD:-}
+      SPREADIT_DISTRICT: ${SPREADIT_DISTRICT:-}
+      SPREADIT_PRODUCTS: ${SPREADIT_PRODUCTS:-}
     volumes:
       - wijkloper-data:/data
     networks:

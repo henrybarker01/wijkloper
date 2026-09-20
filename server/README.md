@@ -61,6 +61,37 @@ Every run is written to the `imports` table, visible with `app.cli imports`.
 Map the distributor's product names to yours with the `import_product_map`
 setting, e.g. `{"Barneveldse Krant": "Barnevelder"}`.
 
+### Nightly import from the spread-it portal
+
+Add the four `SPREADIT_*` values to `~/wijkloper/server/.env` (see
+`.env.example`), restart the container, and tell the importer how the
+distributor's paper maps to yours:
+
+```bash
+docker compose exec wijkloper python -m app.cli map-product "Barneveldse Krant" Barnevelder
+```
+
+Check what it would do before trusting it:
+
+```bash
+docker compose exec wijkloper python -m app.cli sync-spreadit --dry-run
+```
+
+Then schedule it with `crontab -e`:
+
+```
+20 4 * * * cd /home/ubuntu/wijkloper/server && /usr/bin/docker compose exec -T wijkloper python -m app.cli sync-spreadit >> /home/ubuntu/wijkloper-sync.log 2>&1
+```
+
+`SPREADIT_PRODUCTS` limits the import to named products. That matters: the feed
+also contains weekly advertising leaflets whose names change every week, and the
+unaddressed door-to-door copies carry no house list at all. Rounds you maintain
+by hand, such as De Week and the folders, are never touched.
+
+Houses that only subscribe on some weekdays (the Saturday-only ones) are
+detected by comparing the most recent order for each weekday, and are stored as
+a per-address day override, exactly as if a parent had set it in the app.
+
 ## Updating the server
 
 On the PC: commit and push. On the server:

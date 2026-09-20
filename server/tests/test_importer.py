@@ -60,6 +60,7 @@ def test_first_import_creates_street_and_houses(db):
         "houses_in_source": 4,
         "new_streets": 1,
         "added": 4,
+        "changed": 0,
         "removed": 0,
         "unchanged": 0,
     }
@@ -164,6 +165,44 @@ def test_mass_removal_is_refused_unless_forced(db):
     forced = apply_import(db, payload([1]), force=True)
     assert forced["applied"] is True
     assert delivered(db) == {("Nairacstraat", 1, "")}
+
+
+def test_saturday_only_houses_get_a_day_override(db):
+    from app.importer import apply_import
+
+    # 1 and 3 every normal day, 37 only on Saturday.
+    report = apply_import(db, payload([
+        (1, "", ["Barnevelder"]),
+        (3, "", ["Barnevelder"]),
+        (37, "", [{"name": "Barnevelder", "days": [6]}]),
+    ]))
+    assert report["counts"]["added"] == 3
+    days = {
+        r["number"]: r["days"]
+        for r in db.execute(
+            "SELECT a.number, ap.days FROM address_products ap JOIN addresses a ON a.id=ap.address_id"
+        )
+    }
+    assert days == {1: None, 3: None, 37: "6"}
+
+
+def test_a_house_moving_to_saturday_only_is_reported_as_a_change(db):
+    from app.importer import apply_import
+
+    apply_import(db, payload([1, 37]))
+    report = apply_import(db, payload([
+        (1, "", ["Barnevelder"]),
+        (37, "", [{"name": "Barnevelder", "days": [6]}]),
+    ]))
+    assert report["counts"] == {
+        "streets_in_source": 1, "houses_in_source": 2, "new_streets": 0,
+        "added": 0, "changed": 1, "removed": 0, "unchanged": 1,
+    }
+    assert report["changed"] == ["Nairacstraat 37 (usual days -> 6)"]
+    row = db.execute(
+        "SELECT ap.days FROM address_products ap JOIN addresses a ON a.id=ap.address_id WHERE a.number=37"
+    ).fetchone()
+    assert row["days"] == "6"
 
 
 def test_ordinary_churn_passes_the_guard_even_on_a_small_round(db):
