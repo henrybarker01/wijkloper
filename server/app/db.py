@@ -124,6 +124,17 @@ CREATE TABLE IF NOT EXISTS extra_addresses (
     PRIMARY KEY (extra_id, address_id)
 );
 CREATE INDEX IF NOT EXISTS idx_extras_date ON extras(date);
+CREATE TABLE IF NOT EXISTS imports (
+    id          INTEGER PRIMARY KEY,
+    source      TEXT NOT NULL,          -- e.g. 'spread-it'
+    district    TEXT NOT NULL DEFAULT '',
+    ran_at      TEXT NOT NULL,
+    applied     INTEGER NOT NULL DEFAULT 0,
+    ok          INTEGER NOT NULL DEFAULT 1,
+    summary     TEXT NOT NULL DEFAULT '',
+    report_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_imports_ran_at ON imports(ran_at);
 """
 
 NUMBER_ORDERS = (

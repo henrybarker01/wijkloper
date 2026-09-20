@@ -39,8 +39,27 @@ docker compose logs --tail 50 -f     # live API log
 docker compose exec wijkloper python -m app.cli show        # family name, pairing code, counts
 docker compose exec wijkloper python -m app.cli set-pin 4321
 docker compose exec wijkloper python -m app.cli set-code 24681357
+docker compose exec wijkloper python -m app.cli imports     # history of route imports
 docker logs --tail 30 aeromechui-caddy-1                     # certificate / proxy log
 ```
+
+## Importing a delivery list from the distributor
+
+`python -m app.cli import-route <file.json> [--dry-run] [--force]` reconciles the
+route with a normalised delivery list (see [../tools/README.md](../tools/README.md)
+for where that list comes from). The payload names the products it covers, and
+the importer only adds or removes assignments for those products inside the
+streets the list mentions, so a single-paper list can never wipe another round.
+Houses that disappear keep their address row and any note; they just stop being
+delivered.
+
+Safety rail: if a list would stop more than a quarter of the delivered houses
+*and* more than eight of them, the run is refused and recorded rather than
+applied, on the assumption that the source is broken. `--force` overrides it.
+Every run is written to the `imports` table, visible with `app.cli imports`.
+
+Map the distributor's product names to yours with the `import_product_map`
+setting, e.g. `{"Barneveldse Krant": "Barnevelder"}`.
 
 ## Updating the server
 

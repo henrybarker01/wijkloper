@@ -1,0 +1,337 @@
+"""Apply a delivery list from an outside source (the distributor's portal) to
+the Wijkloper route.
+
+The importer takes a *normalised* payload, so the portal-specific parsing lives
+in ``app/sources/`` and this module never has to know about it:
+
+    {
+      "source": "spread-it",
+      "district": "3772-013",
+      "fetched_at": "2026-09-21T03:00:00+02:00",
+      "route": "Route 1",                     # optional, else the first route
+      "covers_products": ["Barneveldse Krant"],
+      "streets": [
+        {"name": "Nairacstraat",
+         "addresses": [{"number": 37, "suffix": "", "products": ["Barneveldse Krant"]}]}
+      ]
+    }
+
+``covers_products`` is what makes a partial list safe: the importer only ever
+adds or removes assignments for the products the payload actually covers, and
+only inside the streets it lists. A Monday list that contains no De Week
+addresses therefore cannot wipe the De Week round.
+
+Houses that disappear from the source keep their address row (with any note a
+parent wrote); only the assignment for the covered product is removed, so the
+house simply stops being delivered.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+
+from .db import bump_config_version, get_setting, now_iso
+
+# A source list that would strip out more than this share of the covered
+# assignments is treated as a broken feed rather than a real change. The guard
+# only bites once more than MIN_REMOVALS houses are involved, so ordinary
+# churn (a handful of stopped subscribers) always goes through.
+DEFAULT_MAX_REMOVE_RATIO = 0.25
+DEFAULT_MIN_REMOVALS_BEFORE_GUARD = 8
+
+# settings key holding {"portal product name": "wijkloper product name"}
+PRODUCT_MAP_KEY = "import_product_map"
+
+AddressKey = Tuple[int, str]  # (number, suffix)
+
+
+class ImportError_(ValueError):
+    """Raised when a payload is unusable; the caller reports and changes nothing."""
+
+
+def normalise_street(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "").strip()).casefold()
+
+
+def _clean_suffix(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def load_product_map(db: sqlite3.Connection) -> Dict[str, str]:
+    raw = get_setting(db, PRODUCT_MAP_KEY, "") or ""
+    if not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return {}
+    return {str(k): str(v) for k, v in value.items()} if isinstance(value, dict) else {}
+
+
+def _resolve_products(
+    db: sqlite3.Connection, names: Iterable[str], product_map: Dict[str, str]
+) -> Dict[str, int]:
+    """Portal product name -> Wijkloper product id, via the configured mapping."""
+    by_name = {
+        str(row["name"]).casefold(): row["id"]
+        for row in db.execute("SELECT id, name FROM products WHERE archived=0")
+    }
+    resolved: Dict[str, int] = {}
+    unknown: List[str] = []
+    for name in names:
+        target = product_map.get(name, name)
+        product_id = by_name.get(str(target).casefold())
+        if product_id is None:
+            unknown.append(f"{name!r}" + ("" if target == name else f" (mapped to {target!r})"))
+        else:
+            resolved[name] = product_id
+    if unknown:
+        raise ImportError_(
+            "These products from the source do not exist in Wijkloper: "
+            + ", ".join(unknown)
+            + ". Add them under Parent mode > Papers & folders, or set the "
+            + f"{PRODUCT_MAP_KEY} setting to map the names."
+        )
+    return resolved
+
+
+def _desired_state(
+    payload: Dict[str, Any], resolved: Dict[str, int]
+) -> Tuple[Dict[str, str], Dict[str, Dict[AddressKey, Set[int]]], Dict[str, List[AddressKey]]]:
+    """Returns (display names, street -> address -> product ids, street -> order)."""
+    display: Dict[str, str] = {}
+    wanted: Dict[str, Dict[AddressKey, Set[int]]] = {}
+    order: Dict[str, List[AddressKey]] = {}
+    for street in payload.get("streets") or []:
+        raw_name = str(street.get("name") or "").strip()
+        if not raw_name:
+            raise ImportError_("A street in the source has no name.")
+        key = normalise_street(raw_name)
+        display.setdefault(key, raw_name)
+        bucket = wanted.setdefault(key, {})
+        sequence = order.setdefault(key, [])
+        for address in street.get("addresses") or []:
+            try:
+                number = int(address["number"])
+            except (KeyError, TypeError, ValueError):
+                raise ImportError_(f"A house in {raw_name} has no usable number: {address!r}") from None
+            address_key: AddressKey = (number, _clean_suffix(address.get("suffix")))
+            products = {
+                resolved[name]
+                for name in (address.get("products") or [])
+                if name in resolved
+            }
+            if address_key in bucket:
+                bucket[address_key] |= products
+            else:
+                bucket[address_key] = products
+                sequence.append(address_key)
+    return display, wanted, order
+
+
+def apply_import(
+    db: sqlite3.Connection,
+    payload: Dict[str, Any],
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+    max_remove_ratio: float = DEFAULT_MAX_REMOVE_RATIO,
+    min_removals_before_guard: int = DEFAULT_MIN_REMOVALS_BEFORE_GUARD,
+) -> Dict[str, Any]:
+    """Reconcile the route with [payload]. Returns a report; raises ImportError_
+    only when the payload itself is unusable."""
+    covers = [str(n) for n in (payload.get("covers_products") or [])]
+    if not covers:
+        raise ImportError_("The source list does not say which products it covers.")
+    if not (payload.get("streets") or []):
+        raise ImportError_("The source list contains no streets; refusing to empty the route.")
+
+    resolved = _resolve_products(db, covers, load_product_map(db))
+    covered_ids = set(resolved.values())
+    display, wanted, order = _desired_state(payload, resolved)
+    if not any(wanted.values()):
+        raise ImportError_("The source list contains no houses; refusing to empty the route.")
+
+    # --- target route
+    route_name = payload.get("route")
+    if route_name:
+        row = db.execute(
+            "SELECT * FROM routes WHERE archived=0 AND name=? COLLATE NOCASE", (str(route_name),)
+        ).fetchone()
+        if row is None:
+            raise ImportError_(f"No route named {route_name!r} in Wijkloper.")
+    else:
+        row = db.execute("SELECT * FROM routes WHERE archived=0 ORDER BY sort_order, id LIMIT 1").fetchone()
+        if row is None:
+            raise ImportError_("Wijkloper has no route to import into.")
+    route_id = row["id"]
+
+    # --- current state for the streets the source covers
+    streets = {
+        normalise_street(r["name"]): r
+        for r in db.execute("SELECT * FROM streets WHERE route_id=?", (route_id,))
+    }
+    current: Dict[str, Dict[AddressKey, Set[int]]] = {}
+    address_ids: Dict[str, Dict[AddressKey, int]] = {}
+    for key, street in streets.items():
+        if key not in wanted:
+            continue
+        bucket: Dict[AddressKey, Set[int]] = {}
+        ids: Dict[AddressKey, int] = {}
+        for addr in db.execute("SELECT * FROM addresses WHERE street_id=?", (street["id"],)):
+            address_key = (addr["number"], _clean_suffix(addr["suffix"]))
+            ids[address_key] = addr["id"]
+            bucket[address_key] = {
+                r["product_id"]
+                for r in db.execute(
+                    "SELECT product_id FROM address_products WHERE address_id=?", (addr["id"],)
+                )
+            } & covered_ids
+        current[key] = bucket
+        address_ids[key] = ids
+
+    # --- diff
+    new_streets = [display[k] for k in wanted if k not in streets]
+    added: List[str] = []
+    removed: List[str] = []
+    for key, houses in wanted.items():
+        have = current.get(key, {})
+        for address_key, products in houses.items():
+            gained = products - have.get(address_key, set())
+            if gained:
+                added.append(f"{display[key]} {address_key[0]}{address_key[1]}")
+        for address_key, products in have.items():
+            lost = products - wanted[key].get(address_key, set())
+            if lost:
+                removed.append(f"{display[key]} {address_key[0]}{address_key[1]}")
+
+    covered_now = sum(1 for houses in current.values() for p in houses.values() if p)
+    ratio = (len(removed) / covered_now) if covered_now else 0.0
+    report: Dict[str, Any] = {
+        "source": payload.get("source", "unknown"),
+        "district": payload.get("district", ""),
+        "fetched_at": payload.get("fetched_at", ""),
+        "route": row["name"],
+        "covers_products": covers,
+        "counts": {
+            "streets_in_source": len(wanted),
+            "houses_in_source": sum(len(h) for h in wanted.values()),
+            "new_streets": len(new_streets),
+            "added": len(added),
+            "removed": len(removed),
+            "unchanged": max(0, covered_now - len(removed)),
+        },
+        "new_streets": new_streets,
+        "added": sorted(added),
+        "removed": sorted(removed),
+        "remove_ratio": round(ratio, 3),
+        "applied": False,
+        "ok": True,
+    }
+
+    if len(removed) > min_removals_before_guard and ratio > max_remove_ratio and not force:
+        report["ok"] = False
+        report["error"] = (
+            f"Refusing to apply: this would stop {len(removed)} of {covered_now} delivered "
+            f"houses ({ratio:.0%}), which looks like a broken source list rather than a real "
+            f"change. Re-run with --force if it really is correct."
+        )
+        _record(db, report, commit=not dry_run)
+        return report
+
+    if dry_run:
+        _record(db, report, commit=False)
+        return report
+
+    # --- apply
+    for key, houses in wanted.items():
+        street = streets.get(key)
+        if street is None:
+            position = db.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM streets WHERE route_id=?",
+                (route_id,),
+            ).fetchone()["n"]
+            # A brand new street takes its walking order straight from the source.
+            cur = db.execute(
+                "INSERT INTO streets(route_id, name, number_order, sort_order) VALUES (?,?,?,?)",
+                (route_id, display[key], "custom", position),
+            )
+            street_id = cur.lastrowid
+            existing_ids: Dict[AddressKey, int] = {}
+        else:
+            street_id = street["id"]
+            existing_ids = address_ids.get(key, {})
+
+        next_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM addresses WHERE street_id=?",
+            (street_id,),
+        ).fetchone()["n"]
+
+        for address_key in order[key]:
+            products = houses[address_key]
+            address_id = existing_ids.get(address_key)
+            if address_id is None:
+                cur = db.execute(
+                    "INSERT INTO addresses(street_id, number, suffix, note, sort_order) VALUES (?,?,?,'',?)",
+                    (street_id, address_key[0], address_key[1], next_order),
+                )
+                address_id = cur.lastrowid
+                next_order += 1
+            for product_id in products:
+                db.execute(
+                    "INSERT INTO address_products(address_id, product_id, days) VALUES (?,?,NULL) "
+                    "ON CONFLICT(address_id, product_id) DO NOTHING",
+                    (address_id, product_id),
+                )
+
+        # Stop delivering covered products to houses the source no longer lists.
+        for address_key, products in current.get(key, {}).items():
+            gone = products - houses.get(address_key, set())
+            for product_id in gone:
+                db.execute(
+                    "DELETE FROM address_products WHERE address_id=? AND product_id=?",
+                    (existing_ids[address_key], product_id),
+                )
+
+    report["applied"] = True
+    report["version"] = bump_config_version(db)
+    _record(db, report, commit=True)
+    return report
+
+
+def _record(db: sqlite3.Connection, report: Dict[str, Any], *, commit: bool) -> None:
+    counts = report["counts"]
+    summary = (
+        f"{counts['added']} added, {counts['removed']} stopped, "
+        f"{counts['new_streets']} new streets"
+    )
+    if not report["ok"]:
+        summary = "refused: " + str(report.get("error", ""))[:160]
+    elif not report["applied"]:
+        summary = "dry run: " + summary
+    db.execute(
+        "INSERT INTO imports(source, district, ran_at, applied, ok, summary, report_json) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (
+            str(report.get("source", "")),
+            str(report.get("district", "")),
+            now_iso(),
+            1 if report["applied"] else 0,
+            1 if report["ok"] else 0,
+            summary,
+            json.dumps(report, ensure_ascii=False),
+        ),
+    )
+    if commit:
+        db.commit()
+
+
+def recent_imports(db: sqlite3.Connection, limit: int = 20) -> List[Dict[str, Any]]:
+    rows = db.execute(
+        "SELECT id, source, district, ran_at, applied, ok, summary FROM imports "
+        "ORDER BY ran_at DESC, id DESC LIMIT ?",
+        (limit,),
+    )
+    return [dict(r) for r in rows]
