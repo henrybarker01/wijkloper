@@ -31,12 +31,13 @@ house simply stops being delivered.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import sqlite3
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from .db import bump_config_version, days_from_list, get_setting, now_iso
+from .db import bump_config_version, days_from_list, get_setting, now_iso, today_local
 
 # A source list that would strip out more than this share of the covered
 # assignments is treated as a broken feed rather than a real change. The guard
@@ -216,26 +217,49 @@ def apply_import(
         address_ids[key] = ids
 
     # --- diff
-    new_streets = [display[k] for k in wanted if k not in streets]
-    added: List[str] = []
-    changed: List[str] = []
-    removed: List[str] = []
+    product_names = {
+        r["id"]: r["name"] for r in db.execute("SELECT id, name FROM products")
+    }
+    new_street_keys = {k for k in wanted if k not in streets}
+    new_streets = [display[k] for k in new_street_keys]
+    records: List[Dict[str, Any]] = []
+
+    def note(kind: str, key: str, address_key: Optional[AddressKey],
+             product_id: Optional[int], days: Optional[str], detail: str) -> None:
+        records.append({
+            "kind": kind,
+            "street_name": display[key],
+            "number": None if address_key is None else address_key[0],
+            "suffix": "" if address_key is None else address_key[1],
+            "product_id": product_id,
+            "product_name": product_names.get(product_id, "") if product_id else "",
+            "days": days,
+            "detail": detail,
+        })
+
     for key, houses in wanted.items():
         have = current.get(key, {})
         for address_key, assignment in houses.items():
-            label = f"{display[key]} {address_key[0]}{address_key[1]}"
             existing = have.get(address_key, {})
             for product_id, days in assignment.items():
                 if product_id not in existing:
-                    added.append(label)
+                    note("added", key, address_key, product_id, days, "")
                 elif existing[product_id] != days:
-                    changed.append(f"{label} ({existing[product_id] or 'usual days'} -> {days or 'usual days'})")
+                    note("days", key, address_key, product_id, days,
+                         f"{existing[product_id] or 'usual days'} -> {days or 'usual days'}")
         for address_key, existing in have.items():
-            label = f"{display[key]} {address_key[0]}{address_key[1]}"
             want = houses.get(address_key, {})
             for product_id in existing:
                 if product_id not in want:
-                    removed.append(label)
+                    note("stopped", key, address_key, product_id, None, "")
+
+    def label_of(record: Dict[str, Any]) -> str:
+        base = f"{record['street_name']} {record['number']}{record['suffix']}"
+        return f"{base} ({record['detail']})" if record["detail"] else base
+
+    added = [label_of(r) for r in records if r["kind"] == "added"]
+    changed = [label_of(r) for r in records if r["kind"] == "days"]
+    removed = [label_of(r) for r in records if r["kind"] == "stopped"]
 
     covered_now = sum(len(a) for houses in current.values() for a in houses.values())
     ratio = (len(removed) / covered_now) if covered_now else 0.0
@@ -285,10 +309,13 @@ def apply_import(
                 "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM streets WHERE route_id=?",
                 (route_id,),
             ).fetchone()["n"]
-            # A brand new street takes its walking order straight from the source.
+            # Ascending by default, so a house added later slots into place
+            # instead of landing at the end of the street. The source's order is
+            # not a walking order anyway; a parent can set one in the app, and
+            # the importer never changes it afterwards.
             cur = db.execute(
                 "INSERT INTO streets(route_id, name, number_order, sort_order) VALUES (?,?,?,?)",
-                (route_id, display[key], "custom", position),
+                (route_id, display[key], "asc", position),
             )
             street_id = cur.lastrowid
             existing_ids: Dict[AddressKey, int] = {}
@@ -328,10 +355,66 @@ def apply_import(
                         (existing_ids[address_key], product_id),
                     )
 
+    _record_changes(db, records, new_street_keys, display)
     report["applied"] = True
     report["version"] = bump_config_version(db)
     _record(db, report, commit=True)
     return report
+
+
+def _record_changes(
+    db: sqlite3.Connection,
+    records: List[Dict[str, Any]],
+    new_street_keys: Set[str],
+    display: Dict[str, str],
+) -> None:
+    """Write the kid-facing "what's changed" feed.
+
+    A brand new street becomes a single entry rather than one per house, so the
+    first import of a round does not bury the feed under fifty notices.
+    """
+    today = today_local().isoformat()
+    stamp = now_iso()
+    new_street_names = {display[k] for k in new_street_keys}
+    counts = {name: 0 for name in new_street_names}
+    for record in records:
+        if record["street_name"] in new_street_names:
+            if record["kind"] == "added":
+                counts[record["street_name"]] += 1
+            continue
+        db.execute(
+            "INSERT INTO route_changes(kind, street_name, number, suffix, product_id, "
+            "product_name, days, detail, date, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                record["kind"], record["street_name"], record["number"], record["suffix"],
+                record["product_id"], record["product_name"], record["days"],
+                record["detail"], today, stamp,
+            ),
+        )
+    for name in sorted(new_street_names):
+        db.execute(
+            "INSERT INTO route_changes(kind, street_name, number, suffix, product_id, "
+            "product_name, days, detail, date, created_at) VALUES ('street',?,NULL,'',NULL,'',NULL,?,?,?)",
+            (name, f"{counts[name]} houses", today, stamp),
+        )
+
+
+def recent_changes(db: sqlite3.Connection, *, days: int = 21) -> List[Dict[str, Any]]:
+    """Route changes from the last [days] days, newest first."""
+    since = (today_local() - dt.timedelta(days=days)).isoformat()
+    rows = db.execute(
+        "SELECT kind, street_name, number, suffix, product_id, product_name, days, detail, date "
+        "FROM route_changes WHERE date >= ? ORDER BY date DESC, street_name, number",
+        (since,),
+    )
+    return [dict(r) for r in rows]
+
+
+def clear_changes(db: sqlite3.Connection) -> int:
+    count = db.execute("SELECT COUNT(*) AS n FROM route_changes").fetchone()["n"]
+    db.execute("DELETE FROM route_changes")
+    db.commit()
+    return count
 
 
 def _record(db: sqlite3.Connection, report: Dict[str, Any], *, commit: bool) -> None:

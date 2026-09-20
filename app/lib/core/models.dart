@@ -286,6 +286,75 @@ class Extra {
       };
 }
 
+/// Something that changed on the round recently: a house that started or
+/// stopped getting a paper, a house that moved to different days, or a whole
+/// new street. The kids walk the route from memory, so these are the things
+/// they would otherwise get wrong.
+enum ChangeKind {
+  added,
+  stopped,
+  days,
+  street;
+
+  static ChangeKind parse(String? value) => ChangeKind.values.firstWhere(
+        (k) => k.name == value,
+        orElse: () => ChangeKind.added,
+      );
+}
+
+class RouteChange {
+  const RouteChange({
+    required this.kind,
+    required this.streetName,
+    required this.date,
+    this.number,
+    this.suffix = '',
+    this.productId,
+    this.productName = '',
+    this.days,
+    this.detail = '',
+  });
+
+  final ChangeKind kind;
+  final String streetName;
+  final String date;
+  final int? number;
+  final String suffix;
+  final int? productId;
+  final String productName;
+  final String? days;
+  final String detail;
+
+  /// "De Heus Plein 65", or just the street for a new street.
+  String get where => number == null ? streetName : '$streetName $number$suffix';
+
+  factory RouteChange.fromJson(Map<String, dynamic> j) => RouteChange(
+        kind: ChangeKind.parse(j['kind'] as String?),
+        streetName: (j['street_name'] as String?) ?? '',
+        date: (j['date'] as String?) ?? '',
+        number: (j['number'] as num?)?.toInt(),
+        suffix: (j['suffix'] as String?) ?? '',
+        productId: (j['product_id'] as num?)?.toInt(),
+        productName: (j['product_name'] as String?) ?? '',
+        days: j['days'] as String?,
+        detail: (j['detail'] as String?) ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind.name,
+        'street_name': streetName,
+        'date': date,
+        'number': number,
+        'suffix': suffix,
+        'product_id': productId,
+        'product_name': productName,
+        'days': days,
+        'detail': detail,
+      };
+}
+
+String normaliseStreet(String name) => name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
 /// The complete route configuration as served by `GET /api/config`.
 class AppConfig {
   AppConfig({
@@ -297,7 +366,9 @@ class AppConfig {
     required List<Street> streets,
     required List<Address> addresses,
     List<Extra> extras = const [],
-  })  : kids = List.unmodifiable(List<Kid>.of(kids)..sort(_bySortOrder)),
+    List<RouteChange> changes = const [],
+  })  : changes = List.unmodifiable(List<RouteChange>.of(changes)),
+        kids = List.unmodifiable(List<Kid>.of(kids)..sort(_bySortOrder)),
         routes = List.unmodifiable(List<RouteInfo>.of(routes)..sort(_bySortOrder)),
         products = List.unmodifiable(List<Product>.of(products)..sort(_bySortOrder)),
         streets = List.unmodifiable(List<Street>.of(streets)..sort(_bySortOrder)),
@@ -316,6 +387,19 @@ class AppConfig {
     }
     for (final e in this.extras) {
       _extrasByDate.putIfAbsent(e.date, () => []).add(e);
+    }
+    // Match each change to a house on the route, so a tile can be marked.
+    final byLocation = <String, int>{};
+    for (final s in this.streets) {
+      _canonicalStreet[normaliseStreet(s.name)] = s.name;
+      for (final a in addressesForStreet(s.id)) {
+        byLocation['${normaliseStreet(s.name)}|${a.number}|${a.suffix}'] = a.id;
+      }
+    }
+    for (final change in this.changes) {
+      if (change.number == null) continue;
+      final id = byLocation['${normaliseStreet(change.streetName)}|${change.number}|${change.suffix}'];
+      if (id != null) _changeByAddress.putIfAbsent(id, () => []).add(change);
     }
   }
 
@@ -337,6 +421,7 @@ class AppConfig {
   final List<Street> streets;
   final List<Address> addresses;
   final List<Extra> extras;
+  final List<RouteChange> changes;
 
   final Map<int, Product> _productById = {};
   final Map<int, Street> _streetById = {};
@@ -344,9 +429,29 @@ class AppConfig {
   final Map<int, List<Street>> _streetsByRoute = {};
   final Map<int, List<Address>> _addressesByStreet = {};
   final Map<String, List<Extra>> _extrasByDate = {};
+  final Map<int, List<RouteChange>> _changeByAddress = {};
+  final Map<String, String> _canonicalStreet = {};
+
+  /// Where a change happened, using the route's own spelling of the street.
+  String whereOf(RouteChange change) {
+    final name = _canonicalStreet[normaliseStreet(change.streetName)] ?? change.streetName.trim();
+    return change.number == null ? name : '$name ${change.number}${change.suffix}';
+  }
 
   /// Extra deliveries on a yyyy-MM-dd date.
   List<Extra> extrasOn(String date) => _extrasByDate[date] ?? const [];
+
+  /// Recent changes affecting one house, if any.
+  List<RouteChange> changesForAddress(int addressId) => _changeByAddress[addressId] ?? const [];
+
+  /// True when this house recently started getting a paper, or moved days.
+  bool isNewlyChanged(int addressId) => _changeByAddress.containsKey(addressId);
+
+  /// Houses that recently stopped, which never appear on the route itself.
+  List<RouteChange> get stoppedChanges =>
+      changes.where((c) => c.kind == ChangeKind.stopped).toList();
+
+  bool get hasChanges => changes.isNotEmpty;
 
   Product? productById(int id) => _productById[id];
   Street? streetById(int id) => _streetById[id];
@@ -392,6 +497,9 @@ class AppConfig {
         extras: ((j['extras'] as List?) ?? const [])
             .map((e) => Extra.fromJson(e as Map<String, dynamic>))
             .toList(),
+        changes: ((j['changes'] as List?) ?? const [])
+            .map((e) => RouteChange.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -403,6 +511,7 @@ class AppConfig {
         'streets': streets.map((s) => s.toJson()).toList(),
         'addresses': addresses.map((a) => a.toJson()).toList(),
         'extras': extras.map((e) => e.toJson()).toList(),
+        'changes': changes.map((c) => c.toJson()).toList(),
       };
 }
 

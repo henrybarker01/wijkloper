@@ -7,6 +7,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/run_state.dart';
 import '../../core/schedule.dart';
+import '../../widgets/changes_card.dart';
 import '../../widgets/common.dart';
 import '../delivery/run_screen.dart';
 import '../parent/parent_gate.dart';
@@ -137,6 +138,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             if (config != null) ...[
               if (config.kids.isEmpty) const _SetupHintCard(),
               if (config.kids.length > 1) _KidPicker(kids: config.kids, selected: kid),
+              if (config.hasChanges) ...[
+                const SizedBox(height: 12),
+                ChangesCard(config: config, compact: true),
+              ],
               if (activeRun != null) ...[
                 const SizedBox(height: 12),
                 _ActiveRunBanner(run: activeRun),

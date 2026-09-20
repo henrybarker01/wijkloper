@@ -148,6 +148,38 @@ void main() {
     expect(copy.addressById(5)!.label, '5a');
   });
 
+  test('recent changes attach to the right house', () {
+    final config = AppConfig(
+      version: 1,
+      familyName: 'Test',
+      kids: const [],
+      routes: [const RouteInfo(id: 10, name: 'Route')],
+      products: const [Product(id: 1, name: 'Barnevelder', shortCode: 'B', colorHex: '#1D4ED8', days: {1})],
+      streets: [const Street(id: 100, routeId: 10, name: 'Nairacstraat')],
+      addresses: const [
+        Address(id: 1, streetId: 100, number: 1, products: [AddressProduct(productId: 1)]),
+        Address(id: 2, streetId: 100, number: 3, products: [AddressProduct(productId: 1)]),
+      ],
+      changes: const [
+        // Matching is tolerant of spacing and case in the street name.
+        RouteChange(kind: ChangeKind.added, streetName: '  nairacstraat ', number: 3,
+            date: '2026-09-20', productName: 'Barnevelder'),
+        RouteChange(kind: ChangeKind.stopped, streetName: 'Nairacstraat', number: 99,
+            date: '2026-09-20', productName: 'Barnevelder'),
+      ],
+    );
+    expect(config.hasChanges, isTrue);
+    expect(config.isNewlyChanged(2), isTrue);
+    expect(config.isNewlyChanged(1), isFalse);
+    expect(config.changesForAddress(2).single.kind, ChangeKind.added);
+    // A stopped house is not on the route any more, so it only shows in the list.
+    expect(config.whereOf(config.stoppedChanges.single), 'Nairacstraat 99');
+    // The route's own spelling wins over whatever the source sent.
+    expect(config.whereOf(config.changesForAddress(2).single), 'Nairacstraat 3');
+    final copy = AppConfig.fromJson(config.toJson());
+    expect(copy.whereOf(copy.changesForAddress(2).single), 'Nairacstraat 3');
+  });
+
   test('marking a whole street done and undoing it', () {
     final run = ActiveRunState(
       clientRunId: 'run-1',

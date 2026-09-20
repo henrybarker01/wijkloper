@@ -65,12 +65,26 @@ def test_first_import_creates_street_and_houses(db):
         "unchanged": 0,
     }
     assert delivered(db) == {("Nairacstraat", n, "") for n in (1, 3, 5, 7)}
-    # A brand new street keeps the source's walking order.
+    # Ascending by default, so houses added later slot into place rather than
+    # landing at the end of the street.
     street = db.execute("SELECT * FROM streets WHERE name='Nairacstraat'").fetchone()
-    assert street["number_order"] == "custom"
+    assert street["number_order"] == "asc"
     order = [r["number"] for r in db.execute(
         "SELECT number FROM addresses WHERE street_id=? ORDER BY sort_order", (street["id"],))]
     assert order == [1, 3, 5, 7]
+
+
+def test_a_parents_walking_order_survives_later_imports(db):
+    from app.importer import apply_import
+
+    apply_import(db, payload([1, 3, 5]))
+    street_id = db.execute("SELECT id FROM streets WHERE name='Nairacstraat'").fetchone()["id"]
+    db.execute("UPDATE streets SET number_order='odd_up_even_back' WHERE id=?", (street_id,))
+    db.commit()
+
+    apply_import(db, payload([1, 3, 5, 7]))
+    row = db.execute("SELECT number_order FROM streets WHERE id=?", (street_id,)).fetchone()
+    assert row["number_order"] == "odd_up_even_back"
 
 
 def test_reimport_of_the_same_list_changes_nothing(db):
@@ -269,6 +283,54 @@ def test_street_matching_ignores_case_and_spacing(db):
     report = apply_import(db, payload([1, 3], street="  nairacstraat "))
     assert report["counts"]["new_streets"] == 0
     assert db.execute("SELECT COUNT(*) AS n FROM streets").fetchone()["n"] == 1
+
+
+def test_a_first_import_records_one_entry_per_street_not_per_house(db):
+    from app.importer import apply_import, recent_changes
+
+    apply_import(db, payload(list(range(1, 21))))
+    changes = recent_changes(db)
+    assert len(changes) == 1
+    assert changes[0]["kind"] == "street"
+    assert changes[0]["street_name"] == "Nairacstraat"
+    assert changes[0]["detail"] == "20 houses"
+
+
+def test_later_changes_are_listed_per_house_for_the_kids(db):
+    from app.importer import apply_import, clear_changes, recent_changes
+
+    apply_import(db, payload([1, 3, 5]))
+    clear_changes(db)  # the initial load is not news
+
+    apply_import(db, payload([
+        (1, "", ["Barnevelder"]),
+        (5, "", [{"name": "Barnevelder", "days": [6]}]),
+        (9, "", ["Barnevelder"]),
+    ]))
+    by_kind = {c["kind"]: c for c in recent_changes(db)}
+    assert set(by_kind) == {"added", "stopped", "days"}
+    assert (by_kind["added"]["number"], by_kind["added"]["street_name"]) == (9, "Nairacstraat")
+    assert by_kind["stopped"]["number"] == 3
+    assert by_kind["days"]["number"] == 5
+    assert by_kind["days"]["days"] == "6"
+    assert by_kind["added"]["product_name"] == "Barnevelder"
+
+
+def test_a_dry_run_records_no_changes_for_the_kids(db):
+    from app.importer import apply_import, clear_changes, recent_changes
+
+    apply_import(db, payload([1]))
+    clear_changes(db)
+    apply_import(db, payload([1, 3]), dry_run=True)
+    assert recent_changes(db) == []
+
+
+def test_changes_can_be_cleared(db):
+    from app.importer import apply_import, clear_changes, recent_changes
+
+    apply_import(db, payload([1, 3]))
+    assert clear_changes(db) == 1
+    assert recent_changes(db) == []
 
 
 def test_every_run_is_recorded(db):

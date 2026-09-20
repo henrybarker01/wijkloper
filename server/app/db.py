@@ -135,6 +135,20 @@ CREATE TABLE IF NOT EXISTS imports (
     report_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_imports_ran_at ON imports(ran_at);
+CREATE TABLE IF NOT EXISTS route_changes (
+    id           INTEGER PRIMARY KEY,
+    kind         TEXT NOT NULL,          -- 'added' | 'stopped' | 'days' | 'street'
+    street_name  TEXT NOT NULL,
+    number       INTEGER,                -- NULL for a whole new street
+    suffix       TEXT NOT NULL DEFAULT '',
+    product_id   INTEGER,
+    product_name TEXT NOT NULL DEFAULT '',
+    days         TEXT,                   -- the new day rule, for kind='days'
+    detail       TEXT NOT NULL DEFAULT '',
+    date         TEXT NOT NULL,          -- local date, yyyy-MM-dd
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_route_changes_date ON route_changes(date);
 """
 
 NUMBER_ORDERS = (

@@ -9,6 +9,7 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/run_state.dart';
 import '../../core/schedule.dart';
+import '../../widgets/changes_card.dart';
 import '../../widgets/common.dart';
 import 'finish_screen.dart';
 
@@ -197,6 +198,12 @@ class _RunScreenState extends ConsumerState<RunScreen> {
     final doneCount = plan.deliveries.where((d) => done.contains(d.address.id)).length;
     final total = plan.totalStops;
     final allDone = total > 0 && doneCount >= total;
+    // Houses that recently started, or moved days; marked so they stand out to
+    // a kid who walks the round from memory.
+    final changedIds = {
+      for (final d in plan.deliveries)
+        if (config.isNewlyChanged(d.address.id)) d.address.id,
+    };
     Delivery? next;
     Street? nextStreet;
     for (final sp in plan.streets) {
@@ -231,6 +238,10 @@ class _RunScreenState extends ConsumerState<RunScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
               children: [
+                if (config.hasChanges) ...[
+                  ChangesCard(config: config),
+                  const SizedBox(height: 12),
+                ],
                 if (next != null && nextStreet != null)
                   _NextUpCard(
                     street: nextStreet,
@@ -257,6 +268,7 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                   _StreetSection(
                     plan: sp,
                     done: done,
+                    changed: changedIds,
                     collapsed: sp.deliveries.every((d) => done.contains(d.address.id)) &&
                         !_expandedDoneStreets.contains(sp.street.id),
                     onToggleCollapse: () => setState(() {
@@ -495,6 +507,7 @@ class _StreetSection extends StatelessWidget {
   const _StreetSection({
     required this.plan,
     required this.done,
+    required this.changed,
     required this.collapsed,
     required this.onToggleCollapse,
     required this.onMarkAll,
@@ -504,6 +517,7 @@ class _StreetSection extends StatelessWidget {
 
   final StreetPlan plan;
   final Set<int> done;
+  final Set<int> changed;
   final bool collapsed;
   final VoidCallback onToggleCollapse;
   final ValueChanged<bool> onMarkAll;
@@ -581,6 +595,7 @@ class _StreetSection extends StatelessWidget {
               return _RunTile(
                 delivery: delivery,
                 done: done.contains(delivery.address.id),
+                isNew: changed.contains(delivery.address.id),
                 onTap: () => onTapAddress(delivery.address.id),
                 onLongPress: () => onLongPressAddress(delivery),
               );
@@ -596,12 +611,16 @@ class _RunTile extends StatelessWidget {
   const _RunTile({
     required this.delivery,
     required this.done,
+    required this.isNew,
     required this.onTap,
     required this.onLongPress,
   });
 
   final Delivery delivery;
   final bool done;
+
+  /// Recently added to the round, or moved to different days.
+  final bool isNew;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -691,6 +710,16 @@ class _RunTile extends StatelessWidget {
                   top: 4,
                   left: 5,
                   child: Icon(Icons.star_rounded, size: 17, color: Colors.amber.withValues(alpha: done ? 0.45 : 1)),
+                ),
+              if (isNew)
+                Positioned(
+                  bottom: 3,
+                  left: 4,
+                  child: Icon(
+                    Icons.fiber_new_rounded,
+                    size: 20,
+                    color: const Color(0xFF2E9E6B).withValues(alpha: done ? 0.4 : 1),
+                  ),
                 ),
             ],
           ),

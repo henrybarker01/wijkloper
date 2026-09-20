@@ -26,6 +26,11 @@ Live server: **https://wijkloper.aeromech.co** (the app connects there by defaul
 * From that, the app computes the plan for any day: how many of each paper to
   pack, and per house what to deliver. Thursday shows coloured labels per house
   (Barnevelder + Folders, Barnevelder only, De Week); normal days just show numbers.
+* **What's changed** is shown at the top of the route: houses that recently
+  started, stopped or moved to different days. Kids who walk the round from
+  memory would otherwise skip a new house or deliver to a stopped one. Newly
+  added houses also carry a badge on their tile. The feed is filled by the
+  nightly import (see [server/README.md](server/README.md)).
 * Kids start the timer and tick houses off on a grid of colour-coded tiles: the
   fill is the newspaper's colour (blue Barnevelder, green De Week), a thick
   border means an insert (orange = Folders), a star marks an extra delivery.

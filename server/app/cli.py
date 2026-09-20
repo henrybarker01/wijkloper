@@ -8,6 +8,8 @@
     python -m app.cli import-route list.json  # apply a delivery list (--dry-run, --force)
     python -m app.cli sync-spreadit           # fetch from the portal and apply (--dry-run)
     python -m app.cli imports                 # recent import runs
+    python -m app.cli changes                 # what the kids see as "changed"
+    python -m app.cli clear-changes           # wipe that feed (after a clean re-import)
 
 sync-spreadit reads SPREADIT_USERNAME, SPREADIT_PASSWORD, SPREADIT_DISTRICT and
 SPREADIT_PRODUCTS (comma separated) from the environment.
@@ -155,6 +157,21 @@ def main(argv=None) -> int:
             if not report["ok"]:
                 print(report.get("error", "refused"), file=sys.stderr)
                 return 1
+            return 0
+        if command == "clear-changes":
+            from .importer import clear_changes
+
+            print(f"Cleared {clear_changes(db)} route changes.")
+            return 0
+        if command == "changes":
+            from .importer import recent_changes
+
+            for row in recent_changes(db):
+                where = row["street_name"]
+                if row["number"] is not None:
+                    where += f" {row['number']}{row['suffix']}"
+                extra = f" ({row['detail']})" if row["detail"] else ""
+                print(f"{row['date']}  {row['kind']:<8} {where}{extra}")
             return 0
         if command == "imports":
             from .importer import recent_imports
