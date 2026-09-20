@@ -12,8 +12,9 @@ import '../../core/schedule.dart';
 import '../../widgets/common.dart';
 import 'finish_screen.dart';
 
-/// The live route: timer, "next up", and every house as a small tile grouped
-/// by street. Tap a tile to tick it off, hold it for details and the note.
+/// The live route: timer, "next up", and every house as a colour-coded tile
+/// grouped by street. Fill = the newspaper, thick border = an insert (folders),
+/// star = one-off extra delivery. Tap a tile to tick it off, hold it for details.
 class RunScreen extends ConsumerStatefulWidget {
   const RunScreen({super.key});
 
@@ -226,7 +227,6 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                   _NextUpCard(
                     street: nextStreet,
                     delivery: next,
-                    showBadges: plan.hasMixedProducts,
                     onTap: () => _toggle(next!.address.id),
                     onLongPress: () => _showDetails(next!, nextStreet!, plan, false),
                   )
@@ -244,41 +244,11 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                       ),
                     ),
                   ),
-                if (plan.hasMixedProducts || plan.extraStops > 0)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
-                    child: Wrap(
-                      spacing: 12,
-                      runSpacing: 4,
-                      children: [
-                        if (plan.hasMixedProducts)
-                          for (final p in plan.productsToday)
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _MiniChip(product: p),
-                                const SizedBox(width: 4),
-                                Text(p.name, style: theme.textTheme.labelMedium),
-                              ],
-                            ),
-                        if (plan.extraStops > 0)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
-                              const SizedBox(width: 4),
-                              Text('extra today', style: theme.textTheme.labelMedium),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 4),
+                _Legend(plan: plan),
                 for (final sp in plan.streets)
                   _StreetSection(
                     plan: sp,
                     done: done,
-                    showBadges: plan.hasMixedProducts,
                     collapsed: sp.deliveries.every((d) => done.contains(d.address.id)) &&
                         !_expandedDoneStreets.contains(sp.street.id),
                     onToggleCollapse: () => setState(() {
@@ -362,14 +332,12 @@ class _NextUpCard extends StatelessWidget {
   const _NextUpCard({
     required this.street,
     required this.delivery,
-    required this.showBadges,
     required this.onTap,
     required this.onLongPress,
   });
 
   final Street street;
   final Delivery delivery;
-  final bool showBadges;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -397,10 +365,8 @@ class _NextUpCard extends StatelessWidget {
                       address.label,
                       style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w900, height: 1.05),
                     ),
-                    if (showBadges || delivery.hasExtra) ...[
-                      const SizedBox(height: 6),
-                      ProductBadges(delivery.products, compact: false, large: true),
-                    ],
+                    const SizedBox(height: 6),
+                    ProductBadges(delivery.products, compact: false, large: true),
                     if (delivery.hasExtra) ...[
                       const SizedBox(height: 6),
                       Row(
@@ -444,11 +410,80 @@ class _NextUpCard extends StatelessWidget {
   }
 }
 
+/// What the colours mean today.
+class _Legend extends StatelessWidget {
+  const _Legend({required this.plan});
+
+  final DayPlan plan;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final papers = plan.productsToday.where((p) => p.kind == ProductKind.paper).toList();
+    final inserts = plan.productsToday.where((p) => p.kind == ProductKind.insert).toList();
+    if (papers.isEmpty && inserts.isEmpty) return const SizedBox(height: 4);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 2),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final p in papers)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _Swatch(fill: p.color),
+                const SizedBox(width: 5),
+                Text(p.name, style: theme.textTheme.labelLarge),
+              ],
+            ),
+          for (final i in inserts)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _Swatch(fill: theme.colorScheme.surface, border: i.color),
+                const SizedBox(width: 5),
+                Text('${i.name} = border', style: theme.textTheme.labelLarge),
+              ],
+            ),
+          if (plan.extraStops > 0)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.star_rounded, size: 18, color: Colors.amber),
+                const SizedBox(width: 3),
+                Text('extra today', style: theme.textTheme.labelLarge),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({required this.fill, this.border});
+
+  final Color fill;
+  final Color? border;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: BorderRadius.circular(5),
+          border: border == null ? null : Border.all(color: border!, width: 3.5),
+        ),
+      );
+}
+
 class _StreetSection extends StatelessWidget {
   const _StreetSection({
     required this.plan,
     required this.done,
-    required this.showBadges,
     required this.collapsed,
     required this.onToggleCollapse,
     required this.onTapAddress,
@@ -457,7 +492,6 @@ class _StreetSection extends StatelessWidget {
 
   final StreetPlan plan;
   final Set<int> done;
-  final bool showBadges;
   final bool collapsed;
   final VoidCallback onToggleCollapse;
   final ValueChanged<int> onTapAddress;
@@ -499,9 +533,9 @@ class _StreetSection extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             padding: EdgeInsets.zero,
-            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 92,
-              mainAxisExtent: showBadges ? 86 : 70,
+              mainAxisExtent: 72,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
             ),
@@ -511,7 +545,6 @@ class _StreetSection extends StatelessWidget {
               return _RunTile(
                 delivery: delivery,
                 done: done.contains(delivery.address.id),
-                showBadges: showBadges,
                 onTap: () => onTapAddress(delivery.address.id),
                 onLongPress: () => onLongPressAddress(delivery),
               );
@@ -522,19 +555,17 @@ class _StreetSection extends StatelessWidget {
   }
 }
 
-/// One house as a small block: number, compact paper labels, tick when done.
+/// One house as a coloured block: fill = newspaper(s), thick border = insert.
 class _RunTile extends StatelessWidget {
   const _RunTile({
     required this.delivery,
     required this.done,
-    required this.showBadges,
     required this.onTap,
     required this.onLongPress,
   });
 
   final Delivery delivery;
   final bool done;
-  final bool showBadges;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -542,77 +573,78 @@ class _RunTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final address = delivery.address;
-    return Material(
-      color: done ? theme.colorScheme.surfaceContainerLowest : theme.colorScheme.surfaceContainerLow,
+    final papers = delivery.products.where((p) => p.kind == ProductKind.paper).toList();
+    final inserts = delivery.products.where((p) => p.kind == ProductKind.insert).toList();
+    final alpha = done ? 0.3 : 1.0;
+
+    final Color fill = papers.isNotEmpty ? papers.first.color : theme.colorScheme.surfaceContainerHighest;
+    final Color? secondFill = papers.length > 1 ? papers[1].color : null;
+    final Color fg = done
+        ? theme.colorScheme.onSurface.withValues(alpha: 0.55)
+        : papers.isNotEmpty
+            ? onColor(fill)
+            : theme.colorScheme.onSurface;
+
+    final decoration = BoxDecoration(
+      color: secondFill == null ? fill.withValues(alpha: alpha) : null,
+      gradient: secondFill == null
+          ? null
+          : LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              stops: const [0, 0.5, 0.5, 1],
+              colors: [
+                fill.withValues(alpha: alpha),
+                fill.withValues(alpha: alpha),
+                secondFill.withValues(alpha: alpha),
+                secondFill.withValues(alpha: alpha),
+              ],
+            ),
       borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      address.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        decoration: done ? TextDecoration.lineThrough : null,
-                        color: done ? theme.colorScheme.outline : null,
-                      ),
+      border: inserts.isEmpty ? null : Border.all(color: inserts.first.color.withValues(alpha: alpha), width: 5),
+    );
+
+    return Material(
+      type: MaterialType.transparency,
+      child: Ink(
+        decoration: decoration,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Stack(
+            children: [
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text(
+                    address.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: fg,
+                      decoration: done ? TextDecoration.lineThrough : null,
+                      decorationColor: fg,
                     ),
-                    if (showBadges) ...[
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 3,
-                        runSpacing: 3,
-                        alignment: WrapAlignment.center,
-                        children: [for (final p in delivery.products) _MiniChip(product: p, faded: done)],
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            if (done)
-              Positioned(top: 4, right: 4, child: Icon(Icons.check_circle, size: 18, color: theme.colorScheme.primary))
-            else if (address.note.isNotEmpty)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Icon(Icons.sticky_note_2_outlined, size: 16, color: theme.colorScheme.outline),
-              ),
-            if (delivery.hasExtra)
-              const Positioned(top: 3, left: 4, child: Icon(Icons.star_rounded, size: 16, color: Colors.amber)),
-          ],
+              if (done)
+                Positioned(top: 5, right: 5, child: Icon(Icons.check_circle, size: 18, color: theme.colorScheme.primary))
+              else if (address.note.isNotEmpty)
+                Positioned(top: 5, right: 5, child: Icon(Icons.sticky_note_2_outlined, size: 15, color: fg)),
+              if (delivery.hasExtra)
+                Positioned(
+                  top: 4,
+                  left: 5,
+                  child: Icon(Icons.star_rounded, size: 17, color: Colors.amber.withValues(alpha: done ? 0.5 : 1)),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
-}
-
-class _MiniChip extends StatelessWidget {
-  const _MiniChip({required this.product, this.faded = false});
-
-  final Product product;
-  final bool faded;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        decoration: BoxDecoration(
-          color: product.color.withValues(alpha: faded ? 0.35 : 1),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          product.shortCode,
-          style: TextStyle(color: onColor(product.color), fontSize: 12, fontWeight: FontWeight.w800),
-        ),
-      );
 }

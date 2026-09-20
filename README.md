@@ -26,9 +26,11 @@ Live server: **https://wijkloper.aeromech.co** (the app connects there by defaul
 * From that, the app computes the plan for any day: how many of each paper to
   pack, and per house what to deliver. Thursday shows coloured labels per house
   (Barnevelder + Folders, Barnevelder only, De Week); normal days just show numbers.
-* Kids start the timer and tick houses off on a grid of number tiles (tap = done,
-  long-press = details and notes), then get a personal-best comparison, streak
-  and family leaderboard when they finish.
+* Kids start the timer and tick houses off on a grid of colour-coded tiles: the
+  fill is the newspaper's colour (blue Barnevelder, green De Week), a thick
+  border means an insert (orange = Folders), a star marks an extra delivery.
+  Tap = done, long-press = details and notes. Finishing shows a personal-best
+  comparison, streak and family leaderboard.
 * Phones keep a copy of the route and of finished runs, so everything works
   without a connection. Runs upload the moment the phone is online again.
 

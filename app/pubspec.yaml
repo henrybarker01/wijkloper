@@ -1,7 +1,7 @@
 name: wijkloper
 description: "Wijkloper: paper route helper for kids and parents"
 publish_to: 'none'
-version: 0.2.0+2
+version: 0.2.1+3
 
 environment:
   sdk: ^3.13.3
