@@ -10,3 +10,7 @@ Thumbs.db
 
 # Built APKs for sharing
 dist/
+
+# Portal credentials and probe output (never commit)
+tools/.env
+tools/out/
