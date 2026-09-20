@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wijkloper/core/models.dart';
+import 'package:wijkloper/core/run_state.dart';
 import 'package:wijkloper/core/schedule.dart';
 
 AppConfig _config({NumberOrder order = NumberOrder.asc, List<Extra> extras = const []}) {
@@ -145,6 +146,26 @@ void main() {
     expect(copy.addressById(1)!.assignmentFor(1)!.days, isNull);
     expect(copy.productById(2)!.kind, ProductKind.insert);
     expect(copy.addressById(5)!.label, '5a');
+  });
+
+  test('marking a whole street done and undoing it', () {
+    final run = ActiveRunState(
+      clientRunId: 'run-1',
+      kidId: 1,
+      routeId: 10,
+      startedAt: DateTime(2026, 9, 14, 16),
+      date: '2026-09-14',
+      weekday: 1,
+    ).toggle(1, now: DateTime(2026, 9, 14, 16, 0, 30));
+    final street = run.markAll([1, 3, 6], done: true, now: DateTime(2026, 9, 14, 16, 5));
+    expect(street.doneAddressIds, {1, 3, 6});
+    expect(street.events.length, 3); // house 1 keeps its original event
+    expect(street.events.first.t, 30);
+    expect(street.events.last.t, 300);
+    final undone = street.markAll([1, 3, 6], done: false);
+    expect(undone.doneAddressIds, isEmpty);
+    expect(undone.events, isEmpty);
+    expect(street.practice, isFalse);
   });
 
   test('run record JSON round trip', () {

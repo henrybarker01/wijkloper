@@ -13,8 +13,9 @@ import '../../widgets/common.dart';
 import 'finish_screen.dart';
 
 /// The live route: timer, "next up", and every house as a colour-coded tile
-/// grouped by street. Fill = the newspaper, thick border = an insert (folders),
-/// star = one-off extra delivery. Tap a tile to tick it off, hold it for details.
+/// grouped by street. Tint = the newspaper, ring = an insert (folders), star =
+/// one-off extra. Tap a tile to tick it off, hold it for details, or tick a
+/// whole street at once with its "All done" button.
 class RunScreen extends ConsumerStatefulWidget {
   const RunScreen({super.key});
 
@@ -45,11 +46,18 @@ class _RunScreenState extends ConsumerState<RunScreen> {
     super.dispose();
   }
 
+  void _haptic() {
+    if (ref.read(settingsStoreProvider).haptics) HapticFeedback.mediumImpact();
+  }
+
   Future<void> _toggle(int addressId) async {
-    if (ref.read(settingsStoreProvider).haptics) {
-      HapticFeedback.mediumImpact();
-    }
+    _haptic();
     await ref.read(activeRunProvider.notifier).toggle(addressId);
+  }
+
+  Future<void> _markStreet(StreetPlan street, {required bool done}) async {
+    _haptic();
+    await ref.read(activeRunProvider.notifier).markAll(street.deliveries.map((d) => d.address.id), done: done);
   }
 
   void _showDetails(Delivery delivery, Street street, DayPlan plan, bool done) {
@@ -256,6 +264,7 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                           ? _expandedDoneStreets.remove(sp.street.id)
                           : _expandedDoneStreets.add(sp.street.id);
                     }),
+                    onMarkAll: (value) => _markStreet(sp, done: value),
                     onTapAddress: _toggle,
                     onLongPressAddress: (delivery) =>
                         _showDetails(delivery, sp.street, plan, done.contains(delivery.address.id)),
@@ -419,6 +428,7 @@ class _Legend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final papers = plan.productsToday.where((p) => p.kind == ProductKind.paper).toList();
     final inserts = plan.productsToday.where((p) => p.kind == ProductKind.insert).toList();
     if (papers.isEmpty && inserts.isEmpty) return const SizedBox(height: 4);
@@ -433,18 +443,18 @@ class _Legend extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _Swatch(fill: p.color),
+                _Swatch(fill: tintedSurface(p.color, scheme), border: tintedEdge(p.color, scheme), borderWidth: 1.5),
                 const SizedBox(width: 5),
-                Text(p.name, style: theme.textTheme.labelLarge),
+                Text(p.name, style: theme.textTheme.labelLarge?.copyWith(color: tintedInk(p.color, scheme))),
               ],
             ),
           for (final i in inserts)
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _Swatch(fill: theme.colorScheme.surface, border: i.color),
+                _Swatch(fill: scheme.surface, border: i.color.withValues(alpha: 0.9), borderWidth: 3),
                 const SizedBox(width: 5),
-                Text('${i.name} = border', style: theme.textTheme.labelLarge),
+                Text('ring = ${i.name}', style: theme.textTheme.labelLarge),
               ],
             ),
           if (plan.extraStops > 0)
@@ -463,10 +473,11 @@ class _Legend extends StatelessWidget {
 }
 
 class _Swatch extends StatelessWidget {
-  const _Swatch({required this.fill, this.border});
+  const _Swatch({required this.fill, required this.border, required this.borderWidth});
 
   final Color fill;
-  final Color? border;
+  final Color border;
+  final double borderWidth;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -475,7 +486,7 @@ class _Swatch extends StatelessWidget {
         decoration: BoxDecoration(
           color: fill,
           borderRadius: BorderRadius.circular(5),
-          border: border == null ? null : Border.all(color: border!, width: 3.5),
+          border: Border.all(color: border, width: borderWidth),
         ),
       );
 }
@@ -486,6 +497,7 @@ class _StreetSection extends StatelessWidget {
     required this.done,
     required this.collapsed,
     required this.onToggleCollapse,
+    required this.onMarkAll,
     required this.onTapAddress,
     required this.onLongPressAddress,
   });
@@ -494,6 +506,7 @@ class _StreetSection extends StatelessWidget {
   final Set<int> done;
   final bool collapsed;
   final VoidCallback onToggleCollapse;
+  final ValueChanged<bool> onMarkAll;
   final ValueChanged<int> onTapAddress;
   final ValueChanged<Delivery> onLongPressAddress;
 
@@ -502,11 +515,17 @@ class _StreetSection extends StatelessWidget {
     final theme = Theme.of(context);
     final doneHere = plan.deliveries.where((d) => done.contains(d.address.id)).length;
     final allDone = doneHere == plan.deliveries.length;
+    final compact = FilledButton.styleFrom(
+      minimumSize: const Size(0, 36),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      textStyle: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
           onTap: allDone ? onToggleCollapse : null,
+          borderRadius: BorderRadius.circular(10),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
             child: Row(
@@ -516,6 +535,8 @@ class _StreetSection extends StatelessWidget {
                 Expanded(
                   child: Text(
                     plan.street.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: allDone ? theme.colorScheme.outline : null,
@@ -523,6 +544,21 @@ class _StreetSection extends StatelessWidget {
                   ),
                 ),
                 Text('$doneHere / ${plan.deliveries.length}', style: theme.textTheme.labelLarge),
+                const SizedBox(width: 8),
+                if (allDone)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                    onPressed: () => onMarkAll(false),
+                    icon: const Icon(Icons.undo, size: 18),
+                    label: const Text('Undo'),
+                  )
+                else
+                  FilledButton.tonalIcon(
+                    style: compact,
+                    onPressed: () => onMarkAll(true),
+                    icon: const Icon(Icons.done_all, size: 18),
+                    label: const Text('All done'),
+                  ),
                 if (allDone) Icon(collapsed ? Icons.expand_more : Icons.expand_less, size: 20),
               ],
             ),
@@ -555,7 +591,7 @@ class _StreetSection extends StatelessWidget {
   }
 }
 
-/// One house as a coloured block: fill = newspaper(s), thick border = insert.
+/// One house as a tinted block: wash = newspaper(s), ring = insert.
 class _RunTile extends StatelessWidget {
   const _RunTile({
     required this.delivery,
@@ -572,36 +608,47 @@ class _RunTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final address = delivery.address;
     final papers = delivery.products.where((p) => p.kind == ProductKind.paper).toList();
     final inserts = delivery.products.where((p) => p.kind == ProductKind.insert).toList();
-    final alpha = done ? 0.3 : 1.0;
 
-    final Color fill = papers.isNotEmpty ? papers.first.color : theme.colorScheme.surfaceContainerHighest;
-    final Color? secondFill = papers.length > 1 ? papers[1].color : null;
-    final Color fg = done
-        ? theme.colorScheme.onSurface.withValues(alpha: 0.55)
-        : papers.isNotEmpty
-            ? onColor(fill)
-            : theme.colorScheme.onSurface;
+    final Color? paperColor = papers.isNotEmpty ? papers.first.color : null;
+    final Color? secondColor = papers.length > 1 ? papers[1].color : null;
+
+    final Color background = done
+        ? scheme.surfaceContainerLow
+        : paperColor != null
+            ? tintedSurface(paperColor, scheme)
+            : scheme.surfaceContainerHigh;
+    final Color? secondBackground = done || secondColor == null ? null : tintedSurface(secondColor, scheme);
+    final Color ink = done
+        ? scheme.outline
+        : paperColor != null
+            ? tintedInk(paperColor, scheme)
+            : scheme.onSurface;
+
+    final BoxBorder border;
+    if (inserts.isNotEmpty) {
+      border = Border.all(color: inserts.first.color.withValues(alpha: done ? 0.25 : 0.9), width: 3.5);
+    } else if (done) {
+      border = Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5), width: 1);
+    } else {
+      border = Border.all(color: paperColor != null ? tintedEdge(paperColor, scheme) : scheme.outlineVariant, width: 1.5);
+    }
 
     final decoration = BoxDecoration(
-      color: secondFill == null ? fill.withValues(alpha: alpha) : null,
-      gradient: secondFill == null
+      color: secondBackground == null ? background : null,
+      gradient: secondBackground == null
           ? null
           : LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               stops: const [0, 0.5, 0.5, 1],
-              colors: [
-                fill.withValues(alpha: alpha),
-                fill.withValues(alpha: alpha),
-                secondFill.withValues(alpha: alpha),
-                secondFill.withValues(alpha: alpha),
-              ],
+              colors: [background, background, secondBackground, secondBackground],
             ),
       borderRadius: BorderRadius.circular(14),
-      border: inserts.isEmpty ? null : Border.all(color: inserts.first.color.withValues(alpha: alpha), width: 5),
+      border: border,
     );
 
     return Material(
@@ -624,22 +671,26 @@ class _RunTile extends StatelessWidget {
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontSize: 24,
                       fontWeight: FontWeight.w800,
-                      color: fg,
+                      color: ink,
                       decoration: done ? TextDecoration.lineThrough : null,
-                      decorationColor: fg,
+                      decorationColor: ink,
                     ),
                   ),
                 ),
               ),
               if (done)
-                Positioned(top: 5, right: 5, child: Icon(Icons.check_circle, size: 18, color: theme.colorScheme.primary))
+                Positioned(top: 5, right: 5, child: Icon(Icons.check_circle, size: 18, color: scheme.primary))
               else if (address.note.isNotEmpty)
-                Positioned(top: 5, right: 5, child: Icon(Icons.sticky_note_2_outlined, size: 15, color: fg)),
+                Positioned(
+                  top: 5,
+                  right: 5,
+                  child: Icon(Icons.sticky_note_2_outlined, size: 15, color: ink.withValues(alpha: 0.8)),
+                ),
               if (delivery.hasExtra)
                 Positioned(
                   top: 4,
                   left: 5,
-                  child: Icon(Icons.star_rounded, size: 17, color: Colors.amber.withValues(alpha: done ? 0.5 : 1)),
+                  child: Icon(Icons.star_rounded, size: 17, color: Colors.amber.withValues(alpha: done ? 0.45 : 1)),
                 ),
             ],
           ),

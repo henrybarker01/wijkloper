@@ -253,6 +253,15 @@ class ActiveRunNotifier extends Notifier<ActiveRunState?> {
     await ref.read(localStoreProvider).writeActiveRun(next);
   }
 
+  /// Ticks (or un-ticks) many houses at once, e.g. a whole street.
+  Future<void> markAll(Iterable<int> addressIds, {required bool done}) async {
+    final current = state;
+    if (current == null) return;
+    final next = current.markAll(addressIds, done: done);
+    state = next;
+    await ref.read(localStoreProvider).writeActiveRun(next);
+  }
+
   /// Ends the run, queues it for upload (unless it is a practice run) and
   /// returns the record plus the upload result when the server was reachable.
   Future<({RunRecord record, RunUploadResult? upload, bool practice})?> finish(

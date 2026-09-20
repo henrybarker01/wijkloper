@@ -56,6 +56,23 @@ class ActiveRunState {
     return copyWith(doneAddressIds: done, events: events);
   }
 
+  /// Marks every address in [ids] delivered (or not) in one go, e.g. a whole street.
+  ActiveRunState markAll(Iterable<int> ids, {required bool done, DateTime? now}) {
+    final doneSet = Set<int>.from(doneAddressIds);
+    final events = List<RunEvent>.from(this.events);
+    final t = elapsedSeconds(now);
+    for (final id in ids) {
+      if (done && !doneSet.contains(id)) {
+        doneSet.add(id);
+        events.add(RunEvent(addressId: id, t: t));
+      } else if (!done && doneSet.contains(id)) {
+        doneSet.remove(id);
+        events.removeWhere((e) => e.addressId == id);
+      }
+    }
+    return copyWith(doneAddressIds: doneSet, events: events);
+  }
+
   /// Turns the run into an uploadable record based on today's [plan].
   RunRecord finish(DayPlan plan, {required bool markAllDone, DateTime? now}) {
     final finishedAt = now ?? DateTime.now();

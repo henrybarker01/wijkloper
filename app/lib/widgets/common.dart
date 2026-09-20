@@ -6,19 +6,21 @@ import '../core/schedule.dart';
 
 const kidEmojis = ['🚴', '🏃', '⚡', '🦊', '🐯', '🚀', '🌟', '🎯', '🐉', '🦄', '🐸', '🛹', '🦁', '🐼', '🔥', '🎸'];
 
+/// A curated, harmonious set of jewel tones for kids and papers. Kept at a
+/// consistent depth/saturation so any pick looks at home next to the others.
 const colorPalette = [
-  '#2563EB',
-  '#DB2777',
-  '#16A34A',
-  '#F59E0B',
-  '#7C3AED',
-  '#DC2626',
-  '#0891B2',
-  '#EA580C',
-  '#4F46E5',
-  '#65A30D',
-  '#0F766E',
-  '#9333EA',
+  '#3B5BD9', // indigo blue
+  '#2E74C4', // blue
+  '#1088B0', // sky
+  '#0E8F86', // teal
+  '#2E9E6B', // emerald
+  '#6C9A2E', // olive green
+  '#C98A26', // amber
+  '#DE7A34', // orange
+  '#D25049', // red
+  '#CB4B84', // rose
+  '#8A54C6', // purple
+  '#6355CE', // violet
 ];
 
 String friendlyDate(DateTime date) => DateFormat('EEEE d MMMM').format(date);
@@ -44,6 +46,24 @@ String timeAgo(DateTime? when) {
 }
 
 Color onColor(Color background) => background.computeLuminance() > 0.45 ? Colors.black : Colors.white;
+
+// --- Tonal colour helpers -----------------------------------------------------
+// A vivid product/kid colour is rendered as a calm trio: a soft tinted surface,
+// a deep readable ink for text/icons, and a translucent edge. Shared by the
+// paper chips and the run tiles so the whole app reads as one palette.
+
+/// Soft tinted background derived from a vivid [color].
+Color tintedSurface(Color color, ColorScheme scheme, {double light = 0.14, double dark = 0.32}) =>
+    Color.alphaBlend(color.withValues(alpha: scheme.brightness == Brightness.dark ? dark : light), scheme.surface);
+
+/// A deep, readable shade of [color] for text and icons on a tinted surface.
+Color tintedInk(Color color, ColorScheme scheme) => scheme.brightness == Brightness.dark
+    ? Color.lerp(color, Colors.white, 0.55)!
+    : Color.lerp(color, Colors.black, 0.38)!;
+
+/// A translucent hairline edge of [color].
+Color tintedEdge(Color color, ColorScheme scheme) =>
+    color.withValues(alpha: scheme.brightness == Brightness.dark ? 0.5 : 0.35);
 
 void showSnack(BuildContext context, String message, {bool error = false}) {
   if (!context.mounted) return;
@@ -90,7 +110,9 @@ Future<bool> confirm(
   return result ?? false;
 }
 
-/// Coloured pill with a product's name (or short code when [compact]).
+/// Soft tonal pill with a product's name (or short code when [compact]): a
+/// tinted background in the product's colour, deep-tone text and a hairline
+/// edge. Reads calmly on white and on the coloured "Next up" card alike.
 class ProductChip extends StatelessWidget {
   const ProductChip(this.product, {super.key, this.compact = false, this.large = false});
 
@@ -100,14 +122,31 @@ class ProductChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = onColor(product.color);
+    final scheme = Theme.of(context).colorScheme;
+    final bg = tintedSurface(product.color, scheme, light: 0.16, dark: 0.38);
+    final fg = tintedInk(product.color, scheme);
     final fontSize = large ? 18.0 : (compact ? 13.0 : 14.0);
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: large ? 14 : (compact ? 8 : 10), vertical: large ? 8 : (compact ? 3 : 5)),
-      decoration: BoxDecoration(color: product.color, borderRadius: BorderRadius.circular(999)),
-      child: Text(
-        compact ? product.shortCode : product.name,
-        style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: fontSize),
+      padding: EdgeInsets.symmetric(horizontal: large ? 14 : (compact ? 9 : 11), vertical: large ? 7 : (compact ? 3 : 5)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tintedEdge(product.color, scheme), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: large ? 11 : 9,
+            height: large ? 11 : 9,
+            decoration: BoxDecoration(color: product.color, shape: BoxShape.circle),
+          ),
+          SizedBox(width: large ? 7 : 5),
+          Text(
+            compact ? product.shortCode : product.name,
+            style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: fontSize),
+          ),
+        ],
       ),
     );
   }
@@ -331,20 +370,22 @@ class StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final base = color ?? scheme.primary;
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
         decoration: BoxDecoration(
-          color: (color ?? theme.colorScheme.primary).withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(14),
+          color: tintedSurface(base, scheme, light: 0.12, dark: 0.30),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
           children: [
-            if (icon != null) Icon(icon, color: color ?? theme.colorScheme.primary),
-            const SizedBox(height: 4),
+            if (icon != null) Icon(icon, color: tintedInk(base, scheme), size: 22),
+            const SizedBox(height: 5),
             Text(
               value,
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: tintedInk(base, scheme)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
