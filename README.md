@@ -19,11 +19,16 @@ Live server: **https://wijkloper.aeromech.co** (the app connects there by defaul
   **house numbers** with a walking order (ascending, odd side up / even side back, …).
 * Every house is linked to the papers it receives. A link can deviate from the
   paper's normal days (a house that only gets the Barnevelder on Saturday).
+* **Extra delivery days**: on specific dates a paper also goes to houses that
+  don't normally get it (special editions). Parents add them under Parent mode ›
+  Extra delivery days, or by selecting houses in a street and choosing Give › Dates.
+  Those houses show a star for the kids and count in the packing list.
 * From that, the app computes the plan for any day: how many of each paper to
   pack, and per house what to deliver. Thursday shows coloured labels per house
   (Barnevelder + Folders, Barnevelder only, De Week); normal days just show numbers.
-* Kids start the timer, tap houses as they deliver, and get a personal-best
-  comparison, streak and family leaderboard when they finish.
+* Kids start the timer and tick houses off on a grid of number tiles (tap = done,
+  long-press = details and notes), then get a personal-best comparison, streak
+  and family leaderboard when they finish.
 * Phones keep a copy of the route and of finished runs, so everything works
   without a connection. Runs upload the moment the phone is online again.
 

@@ -252,6 +252,40 @@ class Address {
       };
 }
 
+/// A one-off delivery: [productId] also goes to [addressIds] on [date]
+/// (yyyy-MM-dd), regardless of the weekday rules.
+class Extra {
+  const Extra({
+    required this.id,
+    required this.productId,
+    required this.date,
+    this.note = '',
+    this.addressIds = const {},
+  });
+
+  final int id;
+  final int productId;
+  final String date;
+  final String note;
+  final Set<int> addressIds;
+
+  factory Extra.fromJson(Map<String, dynamic> j) => Extra(
+        id: (j['id'] as num).toInt(),
+        productId: (j['product_id'] as num).toInt(),
+        date: j['date'] as String,
+        note: (j['note'] as String?) ?? '',
+        addressIds: ((j['address_ids'] as List?) ?? const []).map((e) => (e as num).toInt()).toSet(),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'product_id': productId,
+        'date': date,
+        'note': note,
+        'address_ids': (addressIds.toList()..sort()),
+      };
+}
+
 /// The complete route configuration as served by `GET /api/config`.
 class AppConfig {
   AppConfig({
@@ -262,11 +296,13 @@ class AppConfig {
     required List<Product> products,
     required List<Street> streets,
     required List<Address> addresses,
+    List<Extra> extras = const [],
   })  : kids = List.unmodifiable(List<Kid>.of(kids)..sort(_bySortOrder)),
         routes = List.unmodifiable(List<RouteInfo>.of(routes)..sort(_bySortOrder)),
         products = List.unmodifiable(List<Product>.of(products)..sort(_bySortOrder)),
         streets = List.unmodifiable(List<Street>.of(streets)..sort(_bySortOrder)),
-        addresses = List.unmodifiable(List<Address>.of(addresses)) {
+        addresses = List.unmodifiable(List<Address>.of(addresses)),
+        extras = List.unmodifiable(List<Extra>.of(extras)..sort(_byDate)) {
     for (final p in this.products) {
       _productById[p.id] = p;
     }
@@ -278,6 +314,14 @@ class AppConfig {
       _addressById[a.id] = a;
       _addressesByStreet.putIfAbsent(a.streetId, () => []).add(a);
     }
+    for (final e in this.extras) {
+      _extrasByDate.putIfAbsent(e.date, () => []).add(e);
+    }
+  }
+
+  static int _byDate(Extra a, Extra b) {
+    final byDate = a.date.compareTo(b.date);
+    return byDate != 0 ? byDate : a.id.compareTo(b.id);
   }
 
   static int _bySortOrder(dynamic a, dynamic b) {
@@ -292,12 +336,17 @@ class AppConfig {
   final List<Product> products;
   final List<Street> streets;
   final List<Address> addresses;
+  final List<Extra> extras;
 
   final Map<int, Product> _productById = {};
   final Map<int, Street> _streetById = {};
   final Map<int, Address> _addressById = {};
   final Map<int, List<Street>> _streetsByRoute = {};
   final Map<int, List<Address>> _addressesByStreet = {};
+  final Map<String, List<Extra>> _extrasByDate = {};
+
+  /// Extra deliveries on a yyyy-MM-dd date.
+  List<Extra> extrasOn(String date) => _extrasByDate[date] ?? const [];
 
   Product? productById(int id) => _productById[id];
   Street? streetById(int id) => _streetById[id];
@@ -340,6 +389,9 @@ class AppConfig {
         addresses: ((j['addresses'] as List?) ?? const [])
             .map((e) => Address.fromJson(e as Map<String, dynamic>))
             .toList(),
+        extras: ((j['extras'] as List?) ?? const [])
+            .map((e) => Extra.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -350,6 +402,7 @@ class AppConfig {
         'products': products.map((p) => p.toJson()).toList(),
         'streets': streets.map((s) => s.toJson()).toList(),
         'addresses': addresses.map((a) => a.toJson()).toList(),
+        'extras': extras.map((e) => e.toJson()).toList(),
       };
 }
 

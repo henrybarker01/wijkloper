@@ -233,6 +233,51 @@ def test_streak_logic():
     assert compute_streak(dates, set(), friday) == 0
 
 
+def test_extra_delivery_days(client, device, parent):
+    cfg = client.get("/api/config", headers=device).json()
+    route_id = cfg["routes"][0]["id"]
+    barnevelder = next(p["id"] for p in cfg["products"] if p["name"] == "Barnevelder")
+    street = client.post("/api/admin/routes/%d/streets" % route_id, json={"name": "Extrastraat"}, headers=parent).json()["id"]
+    client.post("/api/admin/streets/%d/addresses/bulk" % street, json={"start": 1, "end": 4}, headers=parent)
+    houses = [a["id"] for a in client.get("/api/config", headers=device).json()["addresses"] if a["street_id"] == street]
+
+    far_future = (dt.date.today() + dt.timedelta(days=30)).isoformat()
+    later = (dt.date.today() + dt.timedelta(days=37)).isoformat()
+    r = client.post(
+        "/api/admin/extras",
+        json={"product_id": barnevelder, "dates": [later, far_future, far_future], "address_ids": houses[:3] + [999999], "note": "Special edition"},
+        headers=parent,
+    )
+    assert r.status_code == 200, r.text
+    ids = r.json()["ids"]
+    assert len(ids) == 2  # duplicate date collapsed, one row per date
+
+    extras = client.get("/api/config", headers=device).json()["extras"]
+    assert [e["date"] for e in extras] == [far_future, later]
+    assert extras[0]["address_ids"] == sorted(houses[:3])  # unknown id dropped
+    assert extras[0]["note"] == "Special edition"
+
+    # Past extras stay in the admin list but not in the phone config.
+    old = client.post(
+        "/api/admin/extras",
+        json={"product_id": barnevelder, "dates": ["2020-01-01"], "address_ids": houses[:1]},
+        headers=parent,
+    ).json()["ids"][0]
+    assert all(e["id"] != old for e in client.get("/api/config", headers=device).json()["extras"])
+    assert any(e["id"] == old for e in client.get("/api/admin/extras", headers=parent).json()["extras"])
+
+    # Update houses and note, then delete.
+    r = client.put("/api/admin/extras/%d" % ids[0], json={"address_ids": houses, "note": "All houses"}, headers=parent)
+    assert r.status_code == 200, r.text
+    assert r.json()["extra"]["address_ids"] == sorted(houses)
+    assert client.put("/api/admin/extras/%d" % ids[0], json={"address_ids": []}, headers=parent).status_code == 400
+    assert client.post("/api/admin/extras", json={"product_id": barnevelder, "dates": ["nonsense"], "address_ids": houses}, headers=parent).status_code == 422
+    for extra_id in ids + [old]:
+        assert client.delete("/api/admin/extras/%d" % extra_id, headers=parent).status_code == 200
+    assert client.get("/api/admin/extras", headers=parent).json()["extras"] == []
+    client.delete("/api/admin/streets/%d" % street, headers=parent)
+
+
 def test_pairing_locks_out_after_repeated_failures(client):
     from app.ratelimit import pair_limiter
 

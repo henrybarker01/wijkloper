@@ -172,6 +172,53 @@ class DayToggleChips extends StatelessWidget {
       );
 }
 
+/// Chosen dates (yyyy-MM-dd) as removable chips plus an "Add date" chip.
+class DateChips extends StatelessWidget {
+  const DateChips({super.key, required this.dates, required this.onChanged, this.single = false});
+
+  final List<String> dates;
+  final ValueChanged<List<String>> onChanged;
+
+  /// Only one date allowed; adding replaces it.
+  final bool single;
+
+  Future<void> _add(BuildContext context) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now.subtract(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 400)),
+    );
+    if (picked == null) return;
+    final key = dateKey(picked);
+    if (single) {
+      onChanged([key]);
+    } else if (!dates.contains(key)) {
+      onChanged([...dates, key]..sort());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final d in dates)
+            InputChip(
+              label: Text(longDate(d)),
+              onDeleted: () => onChanged(dates.where((x) => x != d).toList()),
+            ),
+          ActionChip(
+            avatar: const Icon(Icons.add, size: 18),
+            label: Text(single && dates.isNotEmpty ? 'Change date' : 'Add date'),
+            onPressed: () => _add(context),
+          ),
+        ],
+      );
+}
+
 /// Compact "Mon Tue …" text for a set of days.
 String daysLabel(Set<int> days) {
   if (days.isEmpty) return 'never';

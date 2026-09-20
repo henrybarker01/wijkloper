@@ -2,13 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wijkloper/core/models.dart';
 import 'package:wijkloper/core/schedule.dart';
 
-AppConfig _config({NumberOrder order = NumberOrder.asc}) {
+AppConfig _config({NumberOrder order = NumberOrder.asc, List<Extra> extras = const []}) {
   const barnevelder = 1;
   const folders = 2;
   const deWeek = 3;
   return AppConfig(
     version: 1,
     familyName: 'Test',
+    extras: extras,
     kids: [const Kid(id: 1, name: 'Sam', emoji: '', colorHex: '#000000')],
     routes: [const RouteInfo(id: 10, name: 'Route')],
     products: const [
@@ -72,6 +73,28 @@ void main() {
     expect(plan.streets, isEmpty);
   });
 
+  test('extra delivery day adds houses on that date only and marks them', () {
+    final config = _config(extras: [
+      const Extra(id: 1, productId: 1, date: '2026-09-14', note: 'Special edition', addressIds: {2, 3, 5}),
+    ]);
+    final plan = buildDayPlan(config, 10, monday);
+    // 2 and 5 get nothing on a normal Monday; 3 already gets the Barnevelder.
+    expect(plan.deliveries.map((d) => d.address.number), [1, 2, 3, 5, 6]);
+    expect(plan.deliveryFor(2)!.isExtra(1), isTrue);
+    expect(plan.deliveryFor(5)!.shortLabel, 'B');
+    expect(plan.deliveryFor(3)!.isExtra(1), isFalse);
+    expect(plan.deliveryFor(3)!.products.length, 1); // no duplicate
+    expect(plan.extraStops, 2);
+    expect(plan.extraCountByProduct, {1: 2});
+    expect(plan.countByProduct, {1: 5});
+    expect(plan.packing.single.count, 5);
+    expect(plan.extras.single.note, 'Special edition');
+    // The day after, everything is back to normal.
+    final tuesday = buildDayPlan(config, 10, DateTime(2026, 9, 15));
+    expect(tuesday.deliveries.map((d) => d.address.number), [1, 3, 6]);
+    expect(tuesday.extras, isEmpty);
+  });
+
   test('unknown route yields an empty plan', () {
     expect(buildDayPlan(_config(), 999, monday).totalStops, 0);
     expect(buildDayPlan(_config(), null, monday).totalStops, 0);
@@ -109,9 +132,14 @@ void main() {
     expect(formatDuration(-12), '-0:12');
   });
 
-  test('config JSON round trip keeps assignments and day overrides', () {
-    final config = _config(order: NumberOrder.oddUpEvenBack);
+  test('config JSON round trip keeps assignments, day overrides and extras', () {
+    final config = _config(
+      order: NumberOrder.oddUpEvenBack,
+      extras: [const Extra(id: 7, productId: 1, date: '2026-10-03', note: 'x', addressIds: {1, 2})],
+    );
     final copy = AppConfig.fromJson(config.toJson());
+    expect(copy.extrasOn('2026-10-03').single.addressIds, {1, 2});
+    expect(copy.extrasOn('2026-10-04'), isEmpty);
     expect(copy.streets.single.numberOrder, NumberOrder.oddUpEvenBack);
     expect(copy.addressById(4)!.assignmentFor(1)!.days, {6});
     expect(copy.addressById(1)!.assignmentFor(1)!.days, isNull);

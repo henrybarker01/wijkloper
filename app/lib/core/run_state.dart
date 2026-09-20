@@ -13,6 +13,7 @@ class ActiveRunState {
     required this.weekday,
     this.doneAddressIds = const {},
     this.events = const [],
+    this.practice = false,
   });
 
   final String clientRunId;
@@ -23,6 +24,9 @@ class ActiveRunState {
   final int weekday;
   final Set<int> doneAddressIds;
   final List<RunEvent> events;
+
+  /// A test run (e.g. for another day): never saved or uploaded.
+  final bool practice;
 
   int elapsedSeconds([DateTime? now]) => (now ?? DateTime.now()).difference(startedAt).inSeconds;
 
@@ -35,6 +39,7 @@ class ActiveRunState {
         weekday: weekday,
         doneAddressIds: doneAddressIds ?? this.doneAddressIds,
         events: events ?? this.events,
+        practice: practice,
       );
 
   /// Marks [addressId] delivered (or undoes it when already done).
@@ -90,6 +95,7 @@ class ActiveRunState {
         events: ((j['events'] as List?) ?? const [])
             .map((e) => RunEvent.fromJson(e as Map<String, dynamic>))
             .toList(),
+        practice: (j['practice'] as bool?) ?? false,
       );
 
   Map<String, dynamic> toJson() => {
@@ -101,5 +107,6 @@ class ActiveRunState {
         'weekday': weekday,
         'done': doneAddressIds.toList(),
         'events': events.map((e) => e.toJson()).toList(),
+        'practice': practice,
       };
 }

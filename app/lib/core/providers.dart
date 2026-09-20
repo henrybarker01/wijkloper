@@ -225,7 +225,12 @@ class ActiveRunNotifier extends Notifier<ActiveRunState?> {
   @override
   ActiveRunState? build() => ref.read(initialActiveRunProvider);
 
-  Future<ActiveRunState> start({required Kid? kid, required int? routeId, required DateTime date}) async {
+  Future<ActiveRunState> start({
+    required Kid? kid,
+    required int? routeId,
+    required DateTime date,
+    bool practice = false,
+  }) async {
     final run = ActiveRunState(
       clientRunId: const Uuid().v4(),
       kidId: kid?.id,
@@ -233,6 +238,7 @@ class ActiveRunNotifier extends Notifier<ActiveRunState?> {
       startedAt: DateTime.now(),
       date: dateKey(date),
       weekday: date.weekday,
+      practice: practice,
     );
     state = run;
     await ref.read(localStoreProvider).writeActiveRun(run);
@@ -247,15 +253,20 @@ class ActiveRunNotifier extends Notifier<ActiveRunState?> {
     await ref.read(localStoreProvider).writeActiveRun(next);
   }
 
-  /// Ends the run, queues it for upload and returns the record (plus upload result if online).
-  Future<({RunRecord record, RunUploadResult? upload})?> finish(DayPlan plan, {required bool markAllDone}) async {
+  /// Ends the run, queues it for upload (unless it is a practice run) and
+  /// returns the record plus the upload result when the server was reachable.
+  Future<({RunRecord record, RunUploadResult? upload, bool practice})?> finish(
+    DayPlan plan, {
+    required bool markAllDone,
+  }) async {
     final current = state;
     if (current == null) return null;
     final record = current.finish(plan, markAllDone: markAllDone);
     state = null;
     await ref.read(localStoreProvider).writeActiveRun(null);
+    if (current.practice) return (record: record, upload: null, practice: true);
     final upload = await ref.read(runSyncProvider.notifier).enqueue(record);
-    return (record: record, upload: upload);
+    return (record: record, upload: upload, practice: false);
   }
 
   Future<void> cancel() async {

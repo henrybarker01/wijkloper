@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../core/schedule.dart';
 import '../../widgets/common.dart';
+import 'extras_screen.dart';
 import 'kids_screen.dart';
 import 'parent_settings_screen.dart';
 import 'products_screen.dart';
@@ -18,6 +20,8 @@ class ParentHome extends ConsumerWidget {
     final config = configState.config;
     final streetCount = config?.streets.length ?? 0;
     final houseCount = config?.addresses.length ?? 0;
+    final today = dateKey(DateTime.now());
+    final upcomingExtras = config?.extras.where((e) => e.date.compareTo(today) >= 0).length ?? 0;
 
     void open(Widget screen) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
 
@@ -85,6 +89,16 @@ class ParentHome extends ConsumerWidget {
                 ),
                 const Divider(height: 1),
                 ListTile(
+                  leading: const Icon(Icons.star_outline),
+                  title: const Text('Extra delivery days'),
+                  subtitle: Text(upcomingExtras == 0
+                      ? 'A paper to extra houses on specific dates'
+                      : '$upcomingExtras upcoming'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => open(const ExtrasScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
                   leading: const Icon(Icons.settings),
                   title: const Text('Settings'),
                   subtitle: const Text('Family name, PIN, pairing code, phones'),
@@ -98,7 +112,8 @@ class ParentHome extends ConsumerWidget {
           Text(
             'How it fits together: every house is linked to the papers it gets. '
             'Papers have their own weekdays (Barnevelder Mon–Sat, Folders and De Week on Thursday). '
-            'A house can deviate, e.g. only on Saturday. The app works out the rest per day.',
+            'A house can deviate, e.g. only on Saturday, and extra delivery days add houses on specific dates. '
+            'The app works out the rest per day.',
             style: theme.textTheme.bodySmall,
           ),
         ],

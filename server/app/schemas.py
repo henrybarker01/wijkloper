@@ -143,6 +143,43 @@ class OrderIn(BaseModel):
     ids: List[int]
 
 
+def _clean_dates(dates: List[str]) -> List[str]:
+    import datetime as _dt
+
+    clean = set()
+    for value in dates:
+        try:
+            clean.add(_dt.date.fromisoformat(value.strip()).isoformat())
+        except ValueError:
+            raise ValueError("dates must look like 2026-10-03")
+    return sorted(clean)
+
+
+class ExtraIn(BaseModel):
+    """One-off delivery: a product goes to extra houses on specific dates."""
+
+    product_id: int
+    dates: List[str] = Field(min_length=1, max_length=60)
+    address_ids: List[int] = Field(default_factory=list)
+    note: str = Field(default="", max_length=200)
+
+    @field_validator("dates")
+    @classmethod
+    def _valid_dates(cls, dates: List[str]) -> List[str]:
+        return _clean_dates(dates)
+
+
+class ExtraUpdate(BaseModel):
+    date: Optional[str] = None
+    address_ids: Optional[List[int]] = None
+    note: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("date")
+    @classmethod
+    def _valid_date(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else _clean_dates([value])[0]
+
+
 class SettingsIn(BaseModel):
     family_name: Optional[str] = Field(default=None, min_length=1, max_length=60)
     new_pin: Optional[str] = Field(default=None, min_length=4, max_length=12)

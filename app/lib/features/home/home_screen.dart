@@ -52,7 +52,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       showSnack(context, 'Who is delivering today? Pick a name first.');
       return;
     }
-    await ref.read(activeRunProvider.notifier).start(kid: kid, routeId: routeId, date: _date);
+    var practice = false;
+    if (_dayOffset != 0) {
+      // Another day than today: useful for testing or a late delivery, but make
+      // sure a real run is a deliberate choice because it counts in the stats.
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text("Start ${plan.weekdayName}'s route?"),
+          content: Text(
+            'You are looking at ${friendlyDate(_date)}, not today. A practice run is not saved anywhere; '
+            'a real run counts as a ${plan.weekdayName} run in the stats.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, 'real'), child: const Text('Real run')),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+              onPressed: () => Navigator.pop(context, 'practice'),
+              child: const Text('Practice run'),
+            ),
+          ],
+        ),
+      );
+      if (choice == null || !mounted) return;
+      practice = choice == 'practice';
+    }
+    await ref.read(activeRunProvider.notifier).start(kid: kid, routeId: routeId, date: _date, practice: practice);
     if (!mounted) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RunScreen()));
   }
@@ -127,9 +153,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               const SizedBox(height: 12),
               if (plan.isDeliveryDay && activeRun == null)
                 FilledButton.icon(
-                  onPressed: _dayOffset == 0 ? () => _start(kid, routeId, plan) : null,
+                  onPressed: () => _start(kid, routeId, plan),
                   icon: const Icon(Icons.play_arrow_rounded, size: 28),
-                  label: Text(_dayOffset == 0 ? 'Start route' : 'Preview only — go back to today to start'),
+                  label: Text(_dayOffset == 0 ? 'Start route' : "Start ${plan.weekdayName}'s route"),
                 ),
               if (kid != null) ...[
                 const SizedBox(height: 12),
@@ -329,7 +355,10 @@ class _ActiveRunBanner extends ConsumerWidget {
       color: theme.colorScheme.primaryContainer,
       child: ListTile(
         leading: Icon(Icons.timer, color: theme.colorScheme.onPrimaryContainer),
-        title: Text('Run in progress · $elapsed', style: const TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(
+          '${run.practice ? 'Practice run' : 'Run'} in progress · $elapsed',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
         subtitle: Text('${run.doneAddressIds.length} delivered so far'),
         trailing: FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
@@ -424,6 +453,28 @@ class _DayCard extends StatelessWidget {
                     Text('Take with you', style: theme.textTheme.labelLarge),
                     const SizedBox(height: 8),
                     for (final line in plan.packing) _PackingRow(line: line),
+                    if (plan.extraStops > 0) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.star_rounded, color: Colors.amber),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _extrasText(plan),
+                                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (plan.hasMixedProducts) ...[
                       const SizedBox(height: 12),
                       Container(
@@ -454,6 +505,19 @@ class _DayCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "Extra today: 12× Barnevelder to houses that don't normally get it — Special edition"
+String _extrasText(DayPlan plan) {
+  final parts = <String>[];
+  for (final entry in plan.extraCountByProduct.entries) {
+    final product = plan.allProducts.where((p) => p.id == entry.key).firstOrNull;
+    parts.add('${entry.value}× ${product?.name ?? 'paper'}');
+  }
+  final notes = plan.extras.where((e) => e.note.isNotEmpty).map((e) => e.note).toSet();
+  final base = 'Extra ${plan.date.day == DateTime.now().day && plan.date.month == DateTime.now().month ? 'today' : 'this day'}: '
+      '${parts.join(', ')} to houses that don\'t normally get it (marked with a star).';
+  return notes.isEmpty ? base : '$base ${notes.join('; ')}';
 }
 
 class _PackingRow extends StatelessWidget {

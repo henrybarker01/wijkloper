@@ -108,8 +108,11 @@ Kids deliver a **route**, which is an ordered list of **streets**, each with
 **addresses** (house numbers). **Products** are the things delivered
 (Barnevelder, Folders, De Week) and each has the weekdays it appears on. An
 address is linked to the products it receives; a link can override the days
-(e.g. a house that only gets the Barnevelder on Saturday). Finished **runs**
-store the time, the number of stops and how many of each paper were delivered.
+(e.g. a house that only gets the Barnevelder on Saturday). **Extras** are
+one-off deliveries: a product goes to a list of addresses on one specific date
+(`/api/admin/extras`; phones receive upcoming ones in the config). Finished
+**runs** store the time, the number of stops and how many of each paper were
+delivered.
 
 Default number ordering per street: `asc`, `desc`, `odd_up_even_back`,
 `even_up_odd_back`, `odd_then_even`, `even_then_odd` or `custom`.

@@ -10,12 +10,14 @@ from typing import Iterable, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..auth import require_parent
+from ..config_builder import extra_to_dict, list_extras
 from ..db import (
     bump_config_version,
     days_from_list,
     get_db,
     get_setting,
     hash_secret,
+    now_iso,
     set_setting,
 )
 from ..schemas import (
@@ -24,6 +26,8 @@ from ..schemas import (
     AddressUpdate,
     AssignmentUpdate,
     BulkAddresses,
+    ExtraIn,
+    ExtraUpdate,
     KidIn,
     OrderIn,
     ProductIn,
@@ -398,6 +402,67 @@ def update_assignments(body: AssignmentUpdate, db: sqlite3.Connection = Depends(
                 "DELETE FROM address_products WHERE address_id=? AND product_id=?",
                 (address_id, body.product_id),
             )
+    return _done(db)
+
+
+# --- extra delivery days --------------------------------------------------------
+
+def _existing_address_ids(db: sqlite3.Connection, ids: List[int]) -> List[int]:
+    clean: List[int] = []
+    for address_id in dict.fromkeys(ids):  # de-duplicate, keep order
+        if db.execute("SELECT 1 FROM addresses WHERE id=?", (address_id,)).fetchone():
+            clean.append(address_id)
+    return clean
+
+
+def _set_extra_addresses(db: sqlite3.Connection, extra_id: int, address_ids: List[int]) -> None:
+    db.execute("DELETE FROM extra_addresses WHERE extra_id=?", (extra_id,))
+    for address_id in address_ids:
+        db.execute("INSERT INTO extra_addresses(extra_id, address_id) VALUES (?,?)", (extra_id, address_id))
+
+
+@router.get("/extras")
+def get_extras(db: sqlite3.Connection = Depends(get_db)):
+    """All extra delivery days, past ones included."""
+    return {"extras": list_extras(db)}
+
+
+@router.post("/extras")
+def create_extras(body: ExtraIn, db: sqlite3.Connection = Depends(get_db)):
+    """Creates one extra per date, all with the same houses and note."""
+    _get_or_404(db, "products", body.product_id)
+    address_ids = _existing_address_ids(db, body.address_ids)
+    if not address_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at least one house")
+    ids: List[int] = []
+    for date in body.dates:
+        cur = db.execute(
+            "INSERT INTO extras(product_id, date, note, created_at) VALUES (?,?,?,?)",
+            (body.product_id, date, body.note.strip(), now_iso()),
+        )
+        _set_extra_addresses(db, cur.lastrowid, address_ids)
+        ids.append(cur.lastrowid)
+    return _done(db, ids=ids)
+
+
+@router.put("/extras/{extra_id}")
+def update_extra(extra_id: int, body: ExtraUpdate, db: sqlite3.Connection = Depends(get_db)):
+    extra = _get_or_404(db, "extras", extra_id)
+    date = body.date if body.date is not None else extra["date"]
+    note = body.note.strip() if body.note is not None else extra["note"]
+    db.execute("UPDATE extras SET date=?, note=? WHERE id=?", (date, note, extra_id))
+    if body.address_ids is not None:
+        address_ids = _existing_address_ids(db, body.address_ids)
+        if not address_ids:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at least one house")
+        _set_extra_addresses(db, extra_id, address_ids)
+    return _done(db, extra=extra_to_dict(db, _get_or_404(db, "extras", extra_id)))
+
+
+@router.delete("/extras/{extra_id}")
+def delete_extra(extra_id: int, db: sqlite3.Connection = Depends(get_db)):
+    _get_or_404(db, "extras", extra_id)
+    db.execute("DELETE FROM extras WHERE id=?", (extra_id,))
     return _done(db)
 
 

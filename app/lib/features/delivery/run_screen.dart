@@ -12,7 +12,8 @@ import '../../core/schedule.dart';
 import '../../widgets/common.dart';
 import 'finish_screen.dart';
 
-/// The live route: timer, "next up", and every house grouped by street.
+/// The live route: timer, "next up", and every house as a small tile grouped
+/// by street. Tap a tile to tick it off, hold it for details and the note.
 class RunScreen extends ConsumerStatefulWidget {
   const RunScreen({super.key});
 
@@ -50,6 +51,71 @@ class _RunScreenState extends ConsumerState<RunScreen> {
     await ref.read(activeRunProvider.notifier).toggle(addressId);
   }
 
+  void _showDetails(Delivery delivery, Street street, DayPlan plan, bool done) {
+    final extraNotes = plan.extras
+        .where((e) => delivery.isExtra(e.productId) && e.addressIds.contains(delivery.address.id) && e.note.isNotEmpty)
+        .map((e) => e.note)
+        .toSet()
+        .toList();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(street.name, style: theme.textTheme.titleMedium),
+              Text(
+                delivery.address.label,
+                style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w900, height: 1.05),
+              ),
+              const SizedBox(height: 8),
+              ProductBadges(delivery.products, compact: false, large: true),
+              if (delivery.hasExtra) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Icon(Icons.star_rounded, color: Colors.amber),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Extra delivery today${extraNotes.isEmpty ? '' : ': ${extraNotes.join('; ')}'}',
+                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (delivery.address.note.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(Icons.info_outline, color: theme.colorScheme.primary),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(delivery.address.note, style: theme.textTheme.bodyLarge)),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(sheetContext);
+                  _toggle(delivery.address.id);
+                },
+                icon: Icon(done ? Icons.undo : Icons.check),
+                label: Text(done ? 'Undo, not delivered yet' : 'Delivered'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _finish(DayPlan plan, ActiveRunState run, Kid? kid) async {
     if (_finishing) return;
     final remaining = plan.totalStops - plan.deliveries.where((d) => run.doneAddressIds.contains(d.address.id)).length;
@@ -81,7 +147,13 @@ class _RunScreenState extends ConsumerState<RunScreen> {
     if (result == null) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => FinishScreen(record: result.record, upload: result.upload, plan: plan, kid: kid),
+        builder: (_) => FinishScreen(
+          record: result.record,
+          upload: result.upload,
+          plan: plan,
+          kid: kid,
+          practice: result.practice,
+        ),
       ),
     );
   }
@@ -104,7 +176,6 @@ class _RunScreenState extends ConsumerState<RunScreen> {
     final run = ref.watch(activeRunProvider);
     final config = ref.watch(configProvider).config;
     if (run == null || config == null) {
-      // Run finished/cancelled elsewhere; nothing to show.
       return Scaffold(
         appBar: AppBar(),
         body: const EmptyState(icon: Icons.check_circle_outline, title: 'No run in progress'),
@@ -132,7 +203,7 @@ class _RunScreenState extends ConsumerState<RunScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('${kid?.displayEmoji ?? '🗞️'} ${plan.weekdayName}'),
+        title: Text('${kid?.displayEmoji ?? '🗞️'} ${plan.weekdayName}${run.practice ? ' · practice' : ''}'),
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) {
@@ -157,6 +228,7 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                     delivery: next,
                     showBadges: plan.hasMixedProducts,
                     onTap: () => _toggle(next!.address.id),
+                    onLongPress: () => _showDetails(next!, nextStreet!, plan, false),
                   )
                 else if (allDone)
                   Card(
@@ -172,7 +244,36 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                       ),
                     ),
                   ),
-                const SizedBox(height: 12),
+                if (plan.hasMixedProducts || plan.extraStops > 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      children: [
+                        if (plan.hasMixedProducts)
+                          for (final p in plan.productsToday)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _MiniChip(product: p),
+                                const SizedBox(width: 4),
+                                Text(p.name, style: theme.textTheme.labelMedium),
+                              ],
+                            ),
+                        if (plan.extraStops > 0)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
+                              const SizedBox(width: 4),
+                              Text('extra today', style: theme.textTheme.labelMedium),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 4),
                 for (final sp in plan.streets)
                   _StreetSection(
                     plan: sp,
@@ -186,6 +287,8 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                           : _expandedDoneStreets.add(sp.street.id);
                     }),
                     onTapAddress: _toggle,
+                    onLongPressAddress: (delivery) =>
+                        _showDetails(delivery, sp.street, plan, done.contains(delivery.address.id)),
                   ),
               ],
             ),
@@ -256,12 +359,19 @@ class _Header extends StatelessWidget {
 }
 
 class _NextUpCard extends StatelessWidget {
-  const _NextUpCard({required this.street, required this.delivery, required this.showBadges, required this.onTap});
+  const _NextUpCard({
+    required this.street,
+    required this.delivery,
+    required this.showBadges,
+    required this.onTap,
+    required this.onLongPress,
+  });
 
   final Street street;
   final Delivery delivery;
   final bool showBadges;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -272,6 +382,7 @@ class _NextUpCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
           child: Row(
@@ -286,9 +397,19 @@ class _NextUpCard extends StatelessWidget {
                       address.label,
                       style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w900, height: 1.05),
                     ),
-                    if (showBadges) ...[
+                    if (showBadges || delivery.hasExtra) ...[
                       const SizedBox(height: 6),
                       ProductBadges(delivery.products, compact: false, large: true),
+                    ],
+                    if (delivery.hasExtra) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.star_rounded, size: 18, color: Colors.amber),
+                          const SizedBox(width: 4),
+                          Text('Extra delivery today', style: theme.textTheme.labelLarge),
+                        ],
+                      ),
                     ],
                     if (address.note.isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -296,7 +417,12 @@ class _NextUpCard extends StatelessWidget {
                         children: [
                           Icon(Icons.info_outline, size: 18, color: theme.colorScheme.onPrimaryContainer),
                           const SizedBox(width: 4),
-                          Expanded(child: Text(address.note, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                          Expanded(
+                            child: Text(
+                              address.note,
+                              style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -326,6 +452,7 @@ class _StreetSection extends StatelessWidget {
     required this.collapsed,
     required this.onToggleCollapse,
     required this.onTapAddress,
+    required this.onLongPressAddress,
   });
 
   final StreetPlan plan;
@@ -334,6 +461,7 @@ class _StreetSection extends StatelessWidget {
   final bool collapsed;
   final VoidCallback onToggleCollapse;
   final ValueChanged<int> onTapAddress;
+  final ValueChanged<Delivery> onLongPressAddress;
 
   @override
   Widget build(BuildContext context) {
@@ -346,7 +474,7 @@ class _StreetSection extends StatelessWidget {
         InkWell(
           onTap: allDone ? onToggleCollapse : null,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
+            padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
             child: Row(
               children: [
                 if (allDone) Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 20),
@@ -367,83 +495,124 @@ class _StreetSection extends StatelessWidget {
           ),
         ),
         if (!collapsed)
-          for (final delivery in plan.deliveries)
-            _AddressRow(
-              delivery: delivery,
-              done: done.contains(delivery.address.id),
-              showBadges: showBadges,
-              onTap: () => onTapAddress(delivery.address.id),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 92,
+              mainAxisExtent: showBadges ? 86 : 70,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
             ),
+            itemCount: plan.deliveries.length,
+            itemBuilder: (context, index) {
+              final delivery = plan.deliveries[index];
+              return _RunTile(
+                delivery: delivery,
+                done: done.contains(delivery.address.id),
+                showBadges: showBadges,
+                onTap: () => onTapAddress(delivery.address.id),
+                onLongPress: () => onLongPressAddress(delivery),
+              );
+            },
+          ),
       ],
     );
   }
 }
 
-class _AddressRow extends StatelessWidget {
-  const _AddressRow({required this.delivery, required this.done, required this.showBadges, required this.onTap});
+/// One house as a small block: number, compact paper labels, tick when done.
+class _RunTile extends StatelessWidget {
+  const _RunTile({
+    required this.delivery,
+    required this.done,
+    required this.showBadges,
+    required this.onTap,
+    required this.onLongPress,
+  });
 
   final Delivery delivery;
   final bool done;
   final bool showBadges;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final address = delivery.address;
-    final accent = delivery.products.isEmpty ? theme.colorScheme.primary : delivery.products.first.color;
-    return Opacity(
-      opacity: done ? 0.45 : 1,
-      child: Card(
-        margin: const EdgeInsets.only(bottom: 6),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Row(
-            children: [
-              Container(width: 6, height: 64, color: showBadges ? accent : theme.colorScheme.primary),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 72,
-                child: Text(
-                  address.label,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    decoration: done ? TextDecoration.lineThrough : null,
-                  ),
-                ),
-              ),
-              Expanded(
+    return Material(
+      color: done ? theme.colorScheme.surfaceContainerLowest : theme.colorScheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (showBadges) ProductBadges(delivery.products, compact: false),
-                    if (address.note.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          address.note,
-                          style: theme.textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                    Text(
+                      address.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        decoration: done ? TextDecoration.lineThrough : null,
+                        color: done ? theme.colorScheme.outline : null,
                       ),
+                    ),
+                    if (showBadges) ...[
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 3,
+                        runSpacing: 3,
+                        alignment: WrapAlignment.center,
+                        children: [for (final p in delivery.products) _MiniChip(product: p, faded: done)],
+                      ),
+                    ],
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Icon(
-                  done ? Icons.check_circle : Icons.radio_button_unchecked,
-                  color: done ? theme.colorScheme.primary : theme.colorScheme.outline,
-                  size: 30,
-                ),
+            ),
+            if (done)
+              Positioned(top: 4, right: 4, child: Icon(Icons.check_circle, size: 18, color: theme.colorScheme.primary))
+            else if (address.note.isNotEmpty)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Icon(Icons.sticky_note_2_outlined, size: 16, color: theme.colorScheme.outline),
               ),
-            ],
-          ),
+            if (delivery.hasExtra)
+              const Positioned(top: 3, left: 4, child: Icon(Icons.star_rounded, size: 16, color: Colors.amber)),
+          ],
         ),
       ),
     );
   }
+}
+
+class _MiniChip extends StatelessWidget {
+  const _MiniChip({required this.product, this.faded = false});
+
+  final Product product;
+  final bool faded;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: product.color.withValues(alpha: faded ? 0.35 : 1),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          product.shortCode,
+          style: TextStyle(color: onColor(product.color), fontSize: 12, fontWeight: FontWeight.w800),
+        ),
+      );
 }

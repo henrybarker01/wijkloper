@@ -1,10 +1,36 @@
 """Assemble the full route configuration that phones cache."""
 from __future__ import annotations
 
+import datetime as dt
 import sqlite3
 from typing import Any, Dict, List
 
-from .db import days_to_list, get_setting
+from .db import days_to_list, get_setting, today_local
+
+
+def extra_to_dict(db: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
+    address_ids = [
+        r["address_id"]
+        for r in db.execute(
+            "SELECT address_id FROM extra_addresses WHERE extra_id=? ORDER BY address_id", (row["id"],)
+        )
+    ]
+    return {
+        "id": row["id"],
+        "product_id": row["product_id"],
+        "date": row["date"],
+        "note": row["note"],
+        "address_ids": address_ids,
+    }
+
+
+def list_extras(db: sqlite3.Connection, since: str = None) -> List[Dict[str, Any]]:
+    """Extra delivery days (one row per date), optionally only from ``since`` on."""
+    if since is None:
+        rows = db.execute("SELECT * FROM extras ORDER BY date, id")
+    else:
+        rows = db.execute("SELECT * FROM extras WHERE date >= ? ORDER BY date, id", (since,))
+    return [extra_to_dict(db, r) for r in rows]
 
 
 def build_config(db: sqlite3.Connection) -> Dict[str, Any]:
@@ -81,6 +107,9 @@ def build_config(db: sqlite3.Connection) -> Dict[str, Any]:
         )
     ]
 
+    # Phones only need upcoming extras (plus yesterday, for late uploads around midnight).
+    since = (today_local() - dt.timedelta(days=1)).isoformat()
+
     return {
         "version": version,
         "family_name": get_setting(db, "family_name", "") or "",
@@ -89,4 +118,5 @@ def build_config(db: sqlite3.Connection) -> Dict[str, Any]:
         "products": products,
         "streets": streets,
         "addresses": addresses,
+        "extras": list_extras(db, since),
     }

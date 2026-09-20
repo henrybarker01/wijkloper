@@ -74,19 +74,36 @@ class _StreetScreenState extends ConsumerState<StreetScreen> {
       builder: (_) => _AssignSheet(products: config.products, give: give, count: _selected.length),
     );
     if (choice == null || !mounted) return;
-    final ok = await runAdmin(
-      context,
-      ref,
-      (api) => api.adminAssign(
-        addressIds: _selected.toList(),
-        productId: choice.product.id,
-        assigned: give,
-        days: choice.days,
-      ),
-      success: give
-          ? '${choice.product.name} given to ${_selected.length} houses.'
-          : '${choice.product.name} removed from ${_selected.length} houses.',
-    );
+    final houses = _selected.toList();
+    final bool ok;
+    if (choice.dates != null) {
+      final n = choice.dates!.length;
+      ok = await runAdmin(
+        context,
+        ref,
+        (api) => api.adminCreateExtras(
+          productId: choice.product.id,
+          dates: choice.dates!,
+          addressIds: houses,
+          note: choice.note,
+        ),
+        success: 'Extra delivery: ${choice.product.name} to ${houses.length} houses on $n ${n == 1 ? 'date' : 'dates'}.',
+      );
+    } else {
+      ok = await runAdmin(
+        context,
+        ref,
+        (api) => api.adminAssign(
+          addressIds: houses,
+          productId: choice.product.id,
+          assigned: give,
+          days: choice.days,
+        ),
+        success: give
+            ? '${choice.product.name} given to ${houses.length} houses.'
+            : '${choice.product.name} removed from ${houses.length} houses.',
+      );
+    }
     if (ok) _exitSelection();
   }
 
@@ -542,11 +559,19 @@ class _BulkAddDialogState extends State<_BulkAddDialog> {
 
 // --- give / remove for a selection -----------------------------------------------------
 
+enum _When { usual, weekdays, dates }
+
 class _AssignChoice {
-  const _AssignChoice({required this.product, this.days});
+  const _AssignChoice({required this.product, this.days, this.dates, this.note = ''});
 
   final Product product;
+
+  /// Weekday override for a normal link (null = the product's usual days).
   final Set<int>? days;
+
+  /// When set, this is a one-off extra delivery on these dates instead of a link.
+  final List<String>? dates;
+  final String note;
 }
 
 class _AssignSheet extends StatefulWidget {
@@ -562,8 +587,29 @@ class _AssignSheet extends StatefulWidget {
 
 class _AssignSheetState extends State<_AssignSheet> {
   Product? _product;
-  bool _customDays = false;
+  _When _when = _When.usual;
   Set<int> _days = {};
+  List<String> _dates = [];
+  final _note = TextEditingController();
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  bool get _canSubmit {
+    if (_product == null) return false;
+    if (!widget.give) return true;
+    switch (_when) {
+      case _When.usual:
+        return true;
+      case _When.weekdays:
+        return _days.isNotEmpty;
+      case _When.dates:
+        return _dates.isNotEmpty;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -597,27 +643,55 @@ class _AssignSheetState extends State<_AssignSheet> {
             ),
           ),
           if (widget.give && _product != null) ...[
-            SwitchListTile(
-              title: const Text('Other days than usual'),
-              subtitle: const Text('e.g. only on Saturday'),
-              value: _customDays,
-              onChanged: (v) => setState(() => _customDays = v),
-            ),
-            if (_customDays)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: DayToggleChips(value: _days, onChanged: (v) => setState(() => _days = v)),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<_When>(
+                segments: const [
+                  ButtonSegment(value: _When.usual, label: Text('Usual')),
+                  ButtonSegment(value: _When.weekdays, label: Text('Weekdays')),
+                  ButtonSegment(value: _When.dates, label: Text('Dates')),
+                ],
+                selected: {_when},
+                onSelectionChanged: (s) => setState(() => _when = s.first),
               ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              switch (_when) {
+                _When.usual => 'These houses get ${_product!.name} on its usual days (${daysLabel(_product!.days)}).',
+                _When.weekdays => 'These houses get ${_product!.name} only on the weekdays you pick, every week.',
+                _When.dates => 'One-off extra delivery on specific dates. The houses keep their normal papers; on those dates ${_product!.name} is added.',
+              },
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            if (_when == _When.weekdays)
+              DayToggleChips(value: _days, onChanged: (v) => setState(() => _days = v)),
+            if (_when == _When.dates) ...[
+              DateChips(dates: _dates, onChanged: (v) => setState(() => _dates = v)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _note,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(labelText: 'Note (optional)', hintText: 'Special edition'),
+              ),
+            ],
           ],
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: _product == null || (widget.give && _customDays && _days.isEmpty)
+            onPressed: !_canSubmit
                 ? null
                 : () => Navigator.pop(
                       context,
-                      _AssignChoice(product: _product!, days: widget.give && _customDays ? _days : null),
+                      _AssignChoice(
+                        product: _product!,
+                        days: widget.give && _when == _When.weekdays ? _days : null,
+                        dates: widget.give && _when == _When.dates ? _dates : null,
+                        note: _note.text.trim(),
+                      ),
                     ),
-            child: Text(widget.give ? 'Give' : 'Remove'),
+            child: Text(widget.give ? (_when == _When.dates ? 'Add extra delivery' : 'Give') : 'Remove'),
           ),
         ],
       ),

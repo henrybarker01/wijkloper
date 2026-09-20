@@ -12,7 +12,7 @@ import secrets
 import sqlite3
 from typing import Iterator, List, Optional
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 
 def data_dir() -> str:
@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_kid_date ON runs(kid_id, date);
 CREATE INDEX IF NOT EXISTS idx_addresses_street ON addresses(street_id);
+CREATE TABLE IF NOT EXISTS extras (
+    id         INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    date       TEXT NOT NULL,               -- yyyy-MM-dd, one row per date
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS extra_addresses (
+    extra_id   INTEGER NOT NULL REFERENCES extras(id) ON DELETE CASCADE,
+    address_id INTEGER NOT NULL REFERENCES addresses(id) ON DELETE CASCADE,
+    PRIMARY KEY (extra_id, address_id)
+);
+CREATE INDEX IF NOT EXISTS idx_extras_date ON extras(date);
 """
 
 NUMBER_ORDERS = (

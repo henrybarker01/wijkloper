@@ -51,12 +51,17 @@ String dateKey(DateTime date) {
 
 /// One stop: an address and everything it gets today.
 class Delivery {
-  const Delivery({required this.address, required this.products});
+  const Delivery({required this.address, required this.products, this.extraProductIds = const {}});
 
   final Address address;
   final List<Product> products;
 
+  /// Products this house only gets today because of a one-off extra delivery.
+  final Set<int> extraProductIds;
+
   bool has(int productId) => products.any((p) => p.id == productId);
+  bool isExtra(int productId) => extraProductIds.contains(productId);
+  bool get hasExtra => extraProductIds.isNotEmpty;
 
   /// Short label such as "B+F" or "W".
   String get shortLabel => products.map((p) => p.shortCode).join('+');
@@ -83,12 +88,35 @@ class PackingLine {
 }
 
 class DayPlan {
-  DayPlan({required this.date, required this.route, required this.streets, required this.allProducts});
+  DayPlan({
+    required this.date,
+    required this.route,
+    required this.streets,
+    required this.allProducts,
+    this.extras = const [],
+  });
 
   final DateTime date;
   final RouteInfo? route;
   final List<StreetPlan> streets;
   final List<Product> allProducts;
+
+  /// One-off extra deliveries that apply to this date.
+  final List<Extra> extras;
+
+  /// Houses that get something today only because of an extra delivery.
+  int get extraStops => deliveries.where((d) => d.hasExtra).length;
+
+  /// productId -> number of copies that are one-off extras today.
+  Map<int, int> get extraCountByProduct {
+    final counts = <int, int>{};
+    for (final d in deliveries) {
+      for (final id in d.extraProductIds) {
+        counts[id] = (counts[id] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
 
   int get weekday => date.weekday;
   String get weekdayName => weekdayNames[weekday]!;
@@ -163,8 +191,10 @@ class DayPlan {
   }
 }
 
-/// Which products [address] receives on [weekday].
-List<Product> productsFor(AppConfig config, Address address, int weekday) {
+/// Which products [address] receives on [date]: the weekday rules of its
+/// linked products, plus any one-off extras for that date.
+({List<Product> products, Set<int> extraIds}) productsFor(AppConfig config, Address address, DateTime date) {
+  final weekday = date.weekday;
   final result = <Product>[];
   for (final ap in address.products) {
     final product = config.productById(ap.productId);
@@ -172,11 +202,19 @@ List<Product> productsFor(AppConfig config, Address address, int weekday) {
     final days = ap.days ?? product.days;
     if (days.contains(weekday)) result.add(product);
   }
+  final extraIds = <int>{};
+  for (final extra in config.extrasOn(dateKey(date))) {
+    if (!extra.addressIds.contains(address.id)) continue;
+    final product = config.productById(extra.productId);
+    if (product == null || result.any((p) => p.id == product.id)) continue;
+    result.add(product);
+    extraIds.add(product.id);
+  }
   result.sort((a, b) {
     final byOrder = a.sortOrder.compareTo(b.sortOrder);
     return byOrder != 0 ? byOrder : a.id.compareTo(b.id);
   });
-  return result;
+  return (products: result, extraIds: extraIds);
 }
 
 int _cmpNumberSuffix(Address a, Address b) {
@@ -230,9 +268,9 @@ DayPlan buildDayPlan(AppConfig config, int? routeId, DateTime date) {
       final ordered = orderAddresses(config.addressesForStreet(street.id), street.numberOrder);
       final deliveries = <Delivery>[];
       for (final address in ordered) {
-        final products = productsFor(config, address, date.weekday);
-        if (products.isNotEmpty) {
-          deliveries.add(Delivery(address: address, products: products));
+        final today = productsFor(config, address, date);
+        if (today.products.isNotEmpty) {
+          deliveries.add(Delivery(address: address, products: today.products, extraProductIds: today.extraIds));
         }
       }
       if (deliveries.isNotEmpty) {
@@ -240,7 +278,13 @@ DayPlan buildDayPlan(AppConfig config, int? routeId, DateTime date) {
       }
     }
   }
-  return DayPlan(date: date, route: route, streets: streetPlans, allProducts: config.products);
+  return DayPlan(
+    date: date,
+    route: route,
+    streets: streetPlans,
+    allProducts: config.products,
+    extras: config.extrasOn(dateKey(date)),
+  );
 }
 
 /// Picks the route a kid should walk: their default, else the only/first route.

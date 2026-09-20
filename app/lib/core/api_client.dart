@@ -375,5 +375,32 @@ class ApiClient {
 
   Future<void> adminDeleteRun(int id) => delete('/api/admin/runs/$id', parent: true);
 
+  Future<List<Extra>> adminExtras() async {
+    final json = await get('/api/admin/extras', parent: true);
+    return ((json['extras'] as List?) ?? const [])
+        .map((e) => Extra.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Creates one extra per date; returns their ids.
+  Future<List<int>> adminCreateExtras({
+    required int productId,
+    required List<String> dates,
+    required List<int> addressIds,
+    String note = '',
+  }) async {
+    final json = await post(
+      '/api/admin/extras',
+      {'product_id': productId, 'dates': dates, 'address_ids': addressIds, 'note': note},
+      parent: true,
+    );
+    return ((json['ids'] as List?) ?? const []).map((e) => (e as num).toInt()).toList();
+  }
+
+  Future<void> adminUpdateExtra(int id, {String? date, List<int>? addressIds, String? note}) =>
+      put('/api/admin/extras/$id', {'date': ?date, 'address_ids': ?addressIds, 'note': ?note}, parent: true);
+
+  Future<void> adminDeleteExtra(int id) => delete('/api/admin/extras/$id', parent: true);
+
   void close() => _client.close();
 }

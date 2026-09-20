@@ -8,12 +8,22 @@ import '../../core/schedule.dart';
 import '../../widgets/common.dart';
 
 class FinishScreen extends ConsumerWidget {
-  const FinishScreen({super.key, required this.record, required this.upload, required this.plan, required this.kid});
+  const FinishScreen({
+    super.key,
+    required this.record,
+    required this.upload,
+    required this.plan,
+    required this.kid,
+    this.practice = false,
+  });
 
   final RunRecord record;
   final RunUploadResult? upload;
   final DayPlan plan;
   final Kid? kid;
+
+  /// Test run for another day: nothing was saved or uploaded.
+  final bool practice;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -22,11 +32,15 @@ class FinishScreen extends ConsumerWidget {
 
     // Compare with the best time we know about: fresh from the server if the
     // upload went through, otherwise the last cached stats.
-    final Stats? stats = upload?.stats ?? (kid == null ? null : ref.watch(statsProvider(kid!.id)).value);
+    final Stats? stats =
+        practice ? null : upload?.stats ?? (kid == null ? null : ref.watch(statsProvider(kid!.id)).value);
     final best = stats?.mine.bestByWeekday[record.weekday];
     String headline;
     String detail;
-    if (!record.completed) {
+    if (practice) {
+      headline = 'Practice run finished';
+      detail = 'Nothing was saved or uploaded, so try as often as you like.';
+    } else if (!record.completed) {
       headline = 'Route finished';
       detail = 'Not every house was ticked, so this time does not count for a personal best.';
     } else if (upload != null && best != null && best.runId == upload!.serverId) {
@@ -110,13 +124,23 @@ class FinishScreen extends ConsumerWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(upload == null ? Icons.cloud_upload_outlined : Icons.cloud_done, size: 18, color: theme.colorScheme.outline),
+              Icon(
+                practice
+                    ? Icons.science_outlined
+                    : upload == null
+                        ? Icons.cloud_upload_outlined
+                        : Icons.cloud_done,
+                size: 18,
+                color: theme.colorScheme.outline,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  upload == null
-                      ? 'Saved on this phone. It uploads automatically as soon as the phone is online.'
-                      : 'Uploaded to the family server.',
+                  practice
+                      ? 'Practice run: not saved.'
+                      : upload == null
+                          ? 'Saved on this phone. It uploads automatically as soon as the phone is online.'
+                          : 'Uploaded to the family server.',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
