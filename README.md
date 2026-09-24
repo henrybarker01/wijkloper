@@ -36,6 +36,11 @@ Live server: **https://wijkloper.aeromech.co** (the app connects there by defaul
   border means an insert (orange = Folders), a star marks an extra delivery.
   Tap = done, long-press = details and notes. Finishing shows a personal-best
   comparison, streak and family leaderboard.
+* **Streets fold away.** A round is rarely one straight line: you do part of a
+  street, turn into a side street and come back. Every street can be opened and
+  closed from its header or from a bar at its foot, closing from the foot brings
+  the header back into view, and "Collapse all streets" in the menu turns the
+  route into a short list you can jump around in.
 * Phones keep a copy of the route and of finished runs, so everything works
   without a connection. Runs upload the moment the phone is online again.
 

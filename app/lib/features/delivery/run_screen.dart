@@ -26,8 +26,42 @@ class RunScreen extends ConsumerStatefulWidget {
 
 class _RunScreenState extends ConsumerState<RunScreen> {
   Timer? _ticker;
-  final Set<int> _expandedDoneStreets = {};
+
+  /// Explicit collapse choices per street. A street that is not in here
+  /// follows the default: open while there is still something to deliver,
+  /// closed once it is finished.
+  final Map<int, bool> _collapsed = {};
+
+  /// Header of each street, so collapsing from the bottom can bring the
+  /// header back into view instead of dumping you further down the list.
+  final Map<int, GlobalKey> _headerKeys = {};
   bool _finishing = false;
+
+  GlobalKey _headerKey(int streetId) => _headerKeys.putIfAbsent(streetId, () => GlobalKey());
+
+  bool _isCollapsed(StreetPlan street, Set<int> done) =>
+      _collapsed[street.street.id] ??
+      street.deliveries.every((d) => done.contains(d.address.id));
+
+  void _setCollapsed(int streetId, bool value, {bool revealHeader = false}) {
+    setState(() => _collapsed[streetId] = value);
+    if (!revealHeader) return;
+    // After the list shrinks, scroll the street's header back to the top.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _headerKeys[streetId]?.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(context, alignment: 0, duration: const Duration(milliseconds: 250));
+      }
+    });
+  }
+
+  void _setAllCollapsed(DayPlan plan, bool value) {
+    setState(() {
+      for (final street in plan.streets) {
+        _collapsed[street.street.id] = value;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -222,10 +256,15 @@ class _RunScreenState extends ConsumerState<RunScreen> {
         title: Text('${kid?.displayEmoji ?? '🗞️'} ${plan.weekdayName}${run.practice ? ' · practice' : ''}'),
         actions: [
           PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'cancel') _cancel();
+            onSelected: (value) => switch (value) {
+              'collapse' => _setAllCollapsed(plan, true),
+              'expand' => _setAllCollapsed(plan, false),
+              'cancel' => _cancel(),
+              _ => null,
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'collapse', child: Text('Collapse all streets')),
+              PopupMenuItem(value: 'expand', child: Text('Expand all streets')),
               PopupMenuItem(value: 'cancel', child: Text('Cancel run (discard)')),
             ],
           ),
@@ -269,13 +308,12 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                     plan: sp,
                     done: done,
                     changed: changedIds,
-                    collapsed: sp.deliveries.every((d) => done.contains(d.address.id)) &&
-                        !_expandedDoneStreets.contains(sp.street.id),
-                    onToggleCollapse: () => setState(() {
-                      _expandedDoneStreets.contains(sp.street.id)
-                          ? _expandedDoneStreets.remove(sp.street.id)
-                          : _expandedDoneStreets.add(sp.street.id);
-                    }),
+                    headerKey: _headerKey(sp.street.id),
+                    collapsed: _isCollapsed(sp, done),
+                    onToggleCollapse: () =>
+                        _setCollapsed(sp.street.id, !_isCollapsed(sp, done)),
+                    onCollapseFromBottom: () =>
+                        _setCollapsed(sp.street.id, true, revealHeader: true),
                     onMarkAll: (value) => _markStreet(sp, done: value),
                     onTapAddress: _toggle,
                     onLongPressAddress: (delivery) =>
@@ -508,8 +546,10 @@ class _StreetSection extends StatelessWidget {
     required this.plan,
     required this.done,
     required this.changed,
+    required this.headerKey,
     required this.collapsed,
     required this.onToggleCollapse,
+    required this.onCollapseFromBottom,
     required this.onMarkAll,
     required this.onTapAddress,
     required this.onLongPressAddress,
@@ -518,8 +558,10 @@ class _StreetSection extends StatelessWidget {
   final StreetPlan plan;
   final Set<int> done;
   final Set<int> changed;
+  final Key headerKey;
   final bool collapsed;
   final VoidCallback onToggleCollapse;
+  final VoidCallback onCollapseFromBottom;
   final ValueChanged<bool> onMarkAll;
   final ValueChanged<int> onTapAddress;
   final ValueChanged<Delivery> onLongPressAddress;
@@ -538,12 +580,19 @@ class _StreetSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
-          onTap: allDone ? onToggleCollapse : null,
+          key: headerKey,
+          onTap: onToggleCollapse,
           borderRadius: BorderRadius.circular(10),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
             child: Row(
               children: [
+                Icon(
+                  collapsed ? Icons.expand_more : Icons.expand_less,
+                  size: 22,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
                 if (allDone) Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 20),
                 if (allDone) const SizedBox(width: 6),
                 Expanded(
@@ -573,7 +622,6 @@ class _StreetSection extends StatelessWidget {
                     icon: const Icon(Icons.done_all, size: 18),
                     label: const Text('All done'),
                   ),
-                if (allDone) Icon(collapsed ? Icons.expand_more : Icons.expand_less, size: 20),
               ],
             ),
           ),
@@ -600,6 +648,40 @@ class _StreetSection extends StatelessWidget {
                 onLongPress: () => onLongPressAddress(delivery),
               );
             },
+          ),
+        // Same control at the bottom, so you can close a street you have just
+        // finished without scrolling back up to its header.
+        if (!collapsed)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Material(
+              color: theme.colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onCollapseFromBottom,
+                child: SizedBox(
+                  height: 38,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.expand_less, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Close ${plan.street.name}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
       ],
     );
