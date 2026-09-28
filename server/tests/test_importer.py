@@ -358,7 +358,8 @@ def test_every_run_is_recorded(db):
 def test_failed_attempts_are_recorded_and_the_status_tells_them_apart(db):
     from app.importer import apply_import, import_status, record_failure, recent_imports
 
-    assert import_status(db) == {"last_attempt": None, "last_applied": None}
+    empty = import_status(db)
+    assert empty["last_attempt"] is None and empty["last_applied"] is None and empty["last_changed"] is None
     apply_import(db, payload([1, 3]))
     good = import_status(db)
     assert good["last_applied"]["applied"] is True and good["last_attempt"] == good["last_applied"]
@@ -372,6 +373,25 @@ def test_failed_attempts_are_recorded_and_the_status_tells_them_apart(db):
     status = import_status(db)
     assert status["last_attempt"]["ok"] is False and "503" in status["last_attempt"]["summary"]
     assert status["last_applied"] == good["last_applied"]
+
+
+def test_status_tells_the_last_check_from_the_last_real_change(db, monkeypatch):
+    from app.importer import apply_import, import_status
+
+    monkeypatch.setenv("WIJKLOPER_IMPORT_TIME", "05:45")
+    apply_import(db, payload([1, 3]))
+    first = import_status(db)
+    assert first["last_changed"] == first["last_applied"]
+
+    # A quiet morning: the check happened, the route is what it was.
+    apply_import(db, payload([1, 3]))
+    quiet = import_status(db)
+    assert quiet["last_applied"]["summary"].startswith("0 added, 0 stopped")
+    assert quiet["last_changed"] == first["last_changed"]
+    assert quiet["expected_by"] == "06:00"
+
+    monkeypatch.setenv("WIJKLOPER_IMPORT_TIME", "not a time")
+    assert import_status(db)["expected_by"] == "06:00"
 
 
 def test_changes_fall_off_the_card_after_three_days(db):

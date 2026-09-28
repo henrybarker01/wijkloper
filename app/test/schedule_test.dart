@@ -116,36 +116,46 @@ void main() {
     expect(Address.fromJson(const {'id': 1, 'street_id': 100, 'number': 2}).hasNeeNee, isFalse);
   });
 
-  test('import status: fresh, stale and failed nights', () {
-    final now = DateTime(2026, 9, 28, 8);
+  test('import status: checked this morning, missed, failed', () {
     ImportRun run(DateTime at, {bool ok = true, bool applied = true, String summary = ''}) =>
         ImportRun(ranAt: at, ok: ok, applied: applied, summary: summary, source: 'spread-it');
+    final thisMorning = DateTime(2026, 9, 28, 5, 46);
+    final yesterdayMorning = DateTime(2026, 9, 27, 5, 46);
+    final later = DateTime(2026, 9, 28, 8);
 
-    expect(const ImportStatus().problem(now), ImportProblem.none);
+    expect(const ImportStatus().problem(later), ImportProblem.none);
     final fresh = ImportStatus(
-      lastAttempt: run(DateTime(2026, 9, 28, 4, 20)),
-      lastApplied: run(DateTime(2026, 9, 28, 4, 20), summary: '0 added, 0 stopped'),
+      lastAttempt: run(thisMorning),
+      lastApplied: run(thisMorning, summary: '0 added, 0 stopped'),
+      lastChanged: run(DateTime(2026, 9, 20, 5, 46), summary: '1 added'),
+      expectedBy: '06:00',
     );
-    expect(fresh.problem(now), ImportProblem.none);
-    final stale = ImportStatus(
-      lastAttempt: run(DateTime(2026, 9, 26, 4, 20)),
-      lastApplied: run(DateTime(2026, 9, 26, 4, 20)),
+    expect(fresh.problem(later), ImportProblem.none);
+    // Yesterday's run counts until this morning's is due.
+    final yesterday = ImportStatus(
+      lastAttempt: run(yesterdayMorning),
+      lastApplied: run(yesterdayMorning),
+      expectedBy: '06:00',
     );
-    expect(stale.problem(now), ImportProblem.stale);
+    expect(yesterday.problem(DateTime(2026, 9, 28, 5, 50)), ImportProblem.none);
+    expect(yesterday.problem(DateTime(2026, 9, 28, 6, 1)), ImportProblem.stale);
+    expect(yesterday.problem(later), ImportProblem.stale);
+    // A failed attempt is a problem straight away.
     final failed = ImportStatus(
-      lastAttempt: run(DateTime(2026, 9, 28, 4, 20),
-          ok: false, applied: false, summary: 'failed: could not read the portal: HTTP 503'),
-      lastApplied: run(DateTime(2026, 9, 27, 4, 20)),
+      lastAttempt: run(thisMorning, ok: false, applied: false, summary: 'failed: could not read the portal: HTTP 503'),
+      lastApplied: run(yesterdayMorning),
+      expectedBy: '06:00',
     );
-    expect(failed.problem(now), ImportProblem.failed);
+    expect(failed.problem(DateTime(2026, 9, 28, 5, 50)), ImportProblem.failed);
     expect(failed.lastAttempt!.message, 'could not read the portal: HTTP 503');
-    final dryRunOnly = ImportStatus(lastAttempt: run(now, applied: false, summary: 'dry run: 0 added'));
-    expect(dryRunOnly.problem(now), ImportProblem.stale);
+    final dryRunOnly = ImportStatus(lastAttempt: run(thisMorning, applied: false, summary: 'dry run: 0 added'));
+    expect(dryRunOnly.problem(later), ImportProblem.stale);
 
     final copy = ImportStatus.fromJson(failed.toJson());
     expect(copy.sameAs(failed), isTrue);
     expect(copy.sameAs(fresh), isFalse);
     expect(ImportStatus.fromJson(const {'last_attempt': null, 'last_applied': null}).isEmpty, isTrue);
+    expect(ImportStatus.fromJson(fresh.toJson()).lastChanged!.summary, '1 added');
 
     final config = _config().withImportStatus(fresh);
     expect(AppConfig.fromJson(config.toJson()).importStatus!.sameAs(fresh), isTrue);

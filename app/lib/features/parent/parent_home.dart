@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/schedule.dart';
 import '../../widgets/common.dart';
 import 'extras_screen.dart';
+import 'import_screen.dart';
 import 'kids_screen.dart';
 import 'parent_settings_screen.dart';
 import 'products_screen.dart';
@@ -22,6 +24,21 @@ class ParentHome extends ConsumerWidget {
     final houseCount = config?.addresses.length ?? 0;
     final today = dateKey(DateTime.now());
     final upcomingExtras = config?.extras.where((e) => e.date.compareTo(today) >= 0).length ?? 0;
+    final importStatus = config?.importStatus;
+    final String importSummary;
+    if (importStatus == null || importStatus.isEmpty) {
+      importSummary = 'Nightly check of the subscriber list';
+    } else {
+      importSummary = switch (importStatus.problem(DateTime.now())) {
+        ImportProblem.failed =>
+          'Failed ${timeAgo(importStatus.lastAttempt!.ranAt)}: ${importStatus.lastAttempt!.message}',
+        ImportProblem.stale => importStatus.lastApplied == null
+            ? 'Never imported successfully'
+            : 'No check since ${timeAgo(importStatus.lastApplied!.ranAt)}',
+        ImportProblem.none => 'Checked ${timeAgo(importStatus.lastApplied!.ranAt)} · '
+            '${importStatus.lastChanged == null ? 'no changes yet' : 'last change ${timeAgo(importStatus.lastChanged!.ranAt)}'}',
+      };
+    }
 
     void open(Widget screen) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
 
@@ -77,11 +94,7 @@ class ParentHome extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.route),
                   title: const Text('Route, streets & house numbers'),
-                  subtitle: Text([
-                    '$streetCount ${streetCount == 1 ? 'street' : 'streets'} · $houseCount houses',
-                    if (config?.importStatus?.lastApplied != null)
-                      'list updated ${timeAgo(config!.importStatus!.lastApplied!.ranAt)}',
-                  ].join(' · ')),
+                  subtitle: Text('$streetCount ${streetCount == 1 ? 'street' : 'streets'} · $houseCount houses'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     if (config != null && config.routes.length == 1) {
@@ -100,6 +113,19 @@ class ParentHome extends ConsumerWidget {
                       : '$upcomingExtras upcoming'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => open(const ExtrasScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(
+                    Icons.cloud_download_outlined,
+                    color: importStatus != null && importStatus.problem(DateTime.now()) != ImportProblem.none
+                        ? theme.colorScheme.error
+                        : null,
+                  ),
+                  title: const Text('Portal import'),
+                  subtitle: Text(importSummary),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => open(const ImportScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(

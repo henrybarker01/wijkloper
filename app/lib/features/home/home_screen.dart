@@ -258,8 +258,8 @@ class _ImportBanner extends StatelessWidget {
             'The route may be out of date.',
       _ => status.lastApplied == null
           ? 'The subscriber list has never been imported. The route may be out of date.'
-          : 'Subscriber list not updated since ${timeAgo(status.lastApplied!.ranAt)}. '
-              'The route may be out of date.',
+          : 'No update from the portal since ${timeAgo(status.lastApplied!.ranAt)}; one is expected '
+              'every morning by ${status.expectedBy}. The route may be out of date.',
     };
     return InkWell(
       borderRadius: BorderRadius.circular(12),

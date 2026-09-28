@@ -110,6 +110,14 @@ def list_devices(db: sqlite3.Connection = Depends(get_db)):
     return {"devices": [dict(r) for r in rows]}
 
 
+@router.get("/imports")
+def list_imports(limit: int = 30, db: sqlite3.Connection = Depends(get_db)):
+    """The nightly import: status plus the log of recent attempts, newest first."""
+    from ..importer import import_status, recent_imports
+
+    return {"status": import_status(db), "imports": recent_imports(db, max(1, min(limit, 200)))}
+
+
 @router.delete("/devices/{device_id}")
 def delete_device(device_id: int, db: sqlite3.Connection = Depends(get_db)):
     _get_or_404(db, "devices", device_id)

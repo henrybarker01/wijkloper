@@ -425,31 +425,46 @@ enum ImportProblem { none, failed, stale }
 /// When the subscriber list was last pulled from the distributor's portal, so
 /// the family can tell whether the route on the phone is current.
 class ImportStatus {
-  const ImportStatus({this.lastAttempt, this.lastApplied});
+  const ImportStatus({this.lastAttempt, this.lastApplied, this.lastChanged, this.expectedBy = '06:00'});
 
   /// The most recent run, which may have failed.
   final ImportRun? lastAttempt;
 
-  /// The most recent run that really updated (or confirmed) the route.
+  /// The most recent run that went through (most mornings: "0 added, 0 stopped").
   final ImportRun? lastApplied;
 
-  /// The nightly job runs once a day; a day and a half without a successful
-  /// import means it is broken (cron stopped, portal down, password changed).
-  static const staleAfter = Duration(hours: 36);
+  /// The most recent run that actually changed the route.
+  final ImportRun? lastChanged;
+
+  /// "HH:MM": each morning a successful run is expected by this time.
+  final String expectedBy;
 
   /// No import has ever run on this server: nothing to report.
   bool get isEmpty => lastAttempt == null && lastApplied == null;
 
+  /// Start of the day whose morning run is due: today once [expectedBy] has
+  /// passed, otherwise yesterday.
+  DateTime dueSince(DateTime now) {
+    final parts = expectedBy.split(':');
+    final hour = int.tryParse(parts[0]) ?? 6;
+    final minute = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+    final deadline = DateTime(now.year, now.month, now.day, hour, minute);
+    final due = now.isBefore(deadline) ? deadline.subtract(const Duration(days: 1)) : deadline;
+    return DateTime(due.year, due.month, due.day);
+  }
+
   ImportProblem problem(DateTime now) {
     if (isEmpty) return ImportProblem.none;
     if (lastAttempt != null && !lastAttempt!.ok) return ImportProblem.failed;
-    if (lastApplied == null || now.difference(lastApplied!.ranAt) > staleAfter) return ImportProblem.stale;
+    if (lastApplied == null || lastApplied!.ranAt.isBefore(dueSince(now))) return ImportProblem.stale;
     return ImportProblem.none;
   }
 
   factory ImportStatus.fromJson(Map<String, dynamic> j) => ImportStatus(
         lastAttempt: ImportRun.fromJson(_map(j['last_attempt'])),
         lastApplied: ImportRun.fromJson(_map(j['last_applied'])),
+        lastChanged: ImportRun.fromJson(_map(j['last_changed'])),
+        expectedBy: (j['expected_by'] as String?) ?? '06:00',
       );
 
   static Map<String, dynamic>? _map(Object? value) => value is Map ? Map<String, dynamic>.from(value) : null;
@@ -457,10 +472,15 @@ class ImportStatus {
   Map<String, dynamic> toJson() => {
         'last_attempt': lastAttempt?.toJson(),
         'last_applied': lastApplied?.toJson(),
+        'last_changed': lastChanged?.toJson(),
+        'expected_by': expectedBy,
       };
 
   bool sameAs(ImportStatus other) =>
-      _same(lastAttempt, other.lastAttempt) && _same(lastApplied, other.lastApplied);
+      _same(lastAttempt, other.lastAttempt) &&
+      _same(lastApplied, other.lastApplied) &&
+      _same(lastChanged, other.lastChanged) &&
+      expectedBy == other.expectedBy;
 
   static bool _same(ImportRun? a, ImportRun? b) => a == null ? b == null : b != null && a.sameAs(b);
 }

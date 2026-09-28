@@ -18,6 +18,7 @@ services:
       WIJKLOPER_PARENT_PIN: ${WIJKLOPER_PARENT_PIN:-1234}
       WIJKLOPER_ENABLE_DOCS: ${WIJKLOPER_ENABLE_DOCS:-1}
       WIJKLOPER_TZ: ${WIJKLOPER_TZ:-Europe/Amsterdam}
+      WIJKLOPER_IMPORT_TIME: ${WIJKLOPER_IMPORT_TIME:-05:45}
       # Only used by the nightly `app.cli sync-spreadit` job; the API itself
       # never touches the portal.
       SPREADIT_USERNAME: ${SPREADIT_USERNAME:-}

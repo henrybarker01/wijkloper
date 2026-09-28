@@ -80,14 +80,18 @@ docker compose exec wijkloper python -m app.cli sync-spreadit --dry-run
 Then schedule it with `crontab -e`:
 
 ```
-20 4 * * * cd /home/ubuntu/wijkloper/server && /usr/bin/docker compose exec -T wijkloper python -m app.cli sync-spreadit >> /home/ubuntu/wijkloper-sync.log 2>&1
+45 5 * * * cd /home/ubuntu/wijkloper/server && /usr/bin/docker compose exec -T wijkloper python -m app.cli sync-spreadit >> /home/ubuntu/wijkloper-sync.log 2>&1
 ```
 
-To see whether it is running: the app shows "Subscriber list updated …" under
-*Connection & phone* and warns on the home screen when a night was missed or
-failed; `curl -s https://wijkloper.aeromech.co/api/health` reports
-`last_import_at`; and `docker compose exec wijkloper python -m app.cli imports`
-lists every attempt, failed ones included.
+Keep `WIJKLOPER_IMPORT_TIME` in `.env` in step with that line (05:45 here): the
+phones expect a successful run by that time plus 15 minutes, and show a warning
+on the home screen when a morning is missed or fails.
+
+To see whether it is running: Parent mode → *Portal import* shows the last
+check, the last run that changed anything and the log of recent attempts;
+`curl -s https://wijkloper.aeromech.co/api/health` reports `last_import_at`;
+and `docker compose exec wijkloper python -m app.cli imports` lists every
+attempt, failed ones included.
 
 `SPREADIT_PRODUCTS` limits the import to named products. That matters: the feed
 also contains weekly advertising leaflets whose names change every week, and the

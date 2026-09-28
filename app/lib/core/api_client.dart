@@ -14,6 +14,14 @@ class ConfigFetch {
   final ImportStatus? importStatus;
 }
 
+/// The nightly import log, as Parent mode shows it.
+class ImportLog {
+  const ImportLog({required this.status, required this.runs});
+
+  final ImportStatus status;
+  final List<ImportRun> runs;
+}
+
 class ApiException implements Exception {
   const ApiException(this.message, {this.statusCode, this.isNetwork = false});
 
@@ -317,6 +325,17 @@ class ApiClient {
   }
 
   Future<void> adminDeleteDevice(int id) => delete('/api/admin/devices/$id', parent: true);
+
+  Future<ImportLog> adminImports() async {
+    final json = await get('/api/admin/imports', parent: true);
+    return ImportLog(
+      status: ImportStatus.fromJson(Map<String, dynamic>.from(json['status'] as Map)),
+      runs: ((json['imports'] as List?) ?? const [])
+          .map((e) => ImportRun.fromJson(Map<String, dynamic>.from(e as Map)))
+          .whereType<ImportRun>()
+          .toList(),
+    );
+  }
 
   Future<int> adminCreateKid(Map<String, dynamic> kid) async =>
       (await post('/api/admin/kids', kid, parent: true))['id'] as int;

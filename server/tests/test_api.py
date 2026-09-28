@@ -65,7 +65,9 @@ def test_default_config(client, device):
     assert cfg["products"][1]["kind"] == "insert"
     assert len(cfg["routes"]) == 1
     assert cfg["version"] == 1
-    assert cfg["import_status"] == {"last_attempt": None, "last_applied": None}
+    assert cfg["import_status"] == {
+        "last_attempt": None, "last_applied": None, "last_changed": None, "expected_by": "06:00",
+    }
 
 
 def test_parent_login_rejects_wrong_pin(client, device):
@@ -76,6 +78,15 @@ def test_parent_login_rejects_wrong_pin(client, device):
 def test_admin_requires_parent_token(client, device):
     r = client.post("/api/admin/kids", json={"name": "Nope"}, headers=device)
     assert r.status_code == 403
+
+
+def test_parents_can_read_the_import_log(client, device, parent):
+    assert client.get("/api/admin/imports", headers=device).status_code == 403
+    r = client.get("/api/admin/imports", headers=parent)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body["status"]) == {"last_attempt", "last_applied", "last_changed", "expected_by"}
+    assert isinstance(body["imports"], list)
 
 
 def test_full_route_setup_flow(client, device, parent):
@@ -149,7 +160,7 @@ def test_full_route_setup_flow(client, device, parent):
     unchanged = r.json()
     assert unchanged["unchanged"] is True and unchanged["version"] == cfg2["version"]
     # The import status rides along even when the route did not change.
-    assert set(unchanged["import_status"]) == {"last_attempt", "last_applied"}
+    assert set(unchanged["import_status"]) == {"last_attempt", "last_applied", "last_changed", "expected_by"}
 
     # Edit a single address: note + explicit product list.
     r = client.put(

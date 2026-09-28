@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import sqlite3
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -467,9 +468,38 @@ def record_failure(db: sqlite3.Connection, source: str, district: str, error: st
     db.commit()
 
 
+# The cron job runs the import at WIJKLOPER_IMPORT_TIME (default 05:45, see the
+# README); the phones warn when no run has succeeded by that time plus a little
+# slack for the run itself.
+DEFAULT_IMPORT_TIME = "05:45"
+IMPORT_GRACE_MINUTES = 15
+
+
+def import_deadline() -> str:
+    """"HH:MM" by which each morning's import should have gone through."""
+    raw = os.environ.get("WIJKLOPER_IMPORT_TIME", DEFAULT_IMPORT_TIME)
+    try:
+        hour, minute = (int(part) for part in raw.strip().split(":"))
+        moment = dt.datetime(2000, 1, 1, hour, minute)
+    except ValueError:
+        hour, minute = (int(part) for part in DEFAULT_IMPORT_TIME.split(":"))
+        moment = dt.datetime(2000, 1, 1, hour, minute)
+    return (moment + dt.timedelta(minutes=IMPORT_GRACE_MINUTES)).strftime("%H:%M")
+
+
+def _changed_anything(report_json: str) -> bool:
+    try:
+        counts = json.loads(report_json).get("counts") or {}
+    except (ValueError, AttributeError):
+        return False
+    return any(int(counts.get(key) or 0) for key in ("added", "removed", "changed", "new_streets"))
+
+
 def import_status(db: sqlite3.Connection) -> Dict[str, Any]:
-    """What the phones show as "subscriber list last updated": the latest
-    attempt, which may have failed, and the latest run that really went through."""
+    """What the phones show about the nightly import: the latest attempt (which
+    may have failed), the latest run that went through, the latest run that
+    actually changed the route (most mornings nothing does), and the time of
+    day by which a run is expected."""
 
     def as_dict(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
         if row is None:
@@ -482,10 +512,20 @@ def import_status(db: sqlite3.Connection) -> Dict[str, Any]:
             "summary": row["summary"],
         }
 
-    columns = "SELECT source, ran_at, ok, applied, summary FROM imports "
+    columns = "SELECT source, ran_at, ok, applied, summary, report_json FROM imports "
     attempt = db.execute(columns + "ORDER BY ran_at DESC, id DESC LIMIT 1").fetchone()
     applied = db.execute(columns + "WHERE ok=1 AND applied=1 ORDER BY ran_at DESC, id DESC LIMIT 1").fetchone()
-    return {"last_attempt": as_dict(attempt), "last_applied": as_dict(applied)}
+    changed = None
+    for row in db.execute(columns + "WHERE ok=1 AND applied=1 ORDER BY ran_at DESC, id DESC LIMIT 400"):
+        if _changed_anything(row["report_json"]):
+            changed = row
+            break
+    return {
+        "last_attempt": as_dict(attempt),
+        "last_applied": as_dict(applied),
+        "last_changed": as_dict(changed),
+        "expected_by": import_deadline(),
+    }
 
 
 def recent_imports(db: sqlite3.Connection, limit: int = 20) -> List[Dict[str, Any]]:
@@ -494,4 +534,4 @@ def recent_imports(db: sqlite3.Connection, limit: int = 20) -> List[Dict[str, An
         "ORDER BY ran_at DESC, id DESC LIMIT ?",
         (limit,),
     )
-    return [dict(r) for r in rows]
+    return [{**dict(r), "ok": bool(r["ok"]), "applied": bool(r["applied"])} for r in rows]

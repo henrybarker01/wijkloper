@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../widgets/common.dart';
 
@@ -11,46 +10,6 @@ class ConnectionScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ConnectionScreen> createState() => _ConnectionScreenState();
-}
-
-/// When the subscriber list last came in from the distributor's portal.
-class _ImportTile extends StatelessWidget {
-  const _ImportTile({required this.status});
-
-  final ImportStatus? status;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final s = status ?? const ImportStatus();
-    final problem = s.problem(DateTime.now());
-    final applied = s.lastApplied;
-    final attempt = s.lastAttempt;
-    final String title;
-    final String subtitle;
-    if (s.isEmpty) {
-      title = 'Subscriber list: no automatic import yet';
-      subtitle = 'The nightly import from the portal has not run on this server.';
-    } else {
-      title = applied == null
-          ? 'Subscriber list never imported successfully'
-          : 'Subscriber list updated ${timeAgo(applied.ranAt)}';
-      subtitle = switch (problem) {
-        ImportProblem.failed => 'Last try (${timeAgo(attempt!.ranAt)}) failed: ${attempt.message}',
-        ImportProblem.stale => 'It should run every night. Check the server.',
-        ImportProblem.none => '${applied!.summary} · from ${applied.source}',
-      };
-    }
-    final fine = problem == ImportProblem.none;
-    return ListTile(
-      leading: Icon(
-        fine ? Icons.download_done : Icons.warning_amber_rounded,
-        color: fine ? null : theme.colorScheme.error,
-      ),
-      title: Text(title),
-      subtitle: Text(subtitle),
-    );
-  }
 }
 
 class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
@@ -104,7 +63,6 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                         : 'Route version ${configState.config!.version} · ${configState.config!.addresses.length} houses',
                   ),
                 ),
-                _ImportTile(status: configState.config?.importStatus),
                 ListTile(
                   leading: const Icon(Icons.upload_outlined),
                   title: Text(
