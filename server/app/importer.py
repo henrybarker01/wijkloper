@@ -399,9 +399,14 @@ def _record_changes(
         )
 
 
-def recent_changes(db: sqlite3.Connection, *, days: int = 21) -> List[Dict[str, Any]]:
-    """Route changes from the last [days] days, newest first."""
-    since = (today_local() - dt.timedelta(days=days)).isoformat()
+# How long a change stays on the "what changed" card: the day it came in and
+# the two rounds after it. After that the new state is simply the route.
+CHANGE_VISIBLE_DAYS = 3
+
+
+def recent_changes(db: sqlite3.Connection, *, days: int = CHANGE_VISIBLE_DAYS) -> List[Dict[str, Any]]:
+    """Route changes recorded today or on the [days] - 1 days before, newest first."""
+    since = (today_local() - dt.timedelta(days=max(days, 1) - 1)).isoformat()
     rows = db.execute(
         "SELECT kind, street_name, number, suffix, product_id, product_name, days, detail, date "
         "FROM route_changes WHERE date >= ? ORDER BY date DESC, street_name, number",

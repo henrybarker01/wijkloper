@@ -125,6 +125,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             icon: const Icon(Icons.lock_outline),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ParentGate())),
           ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (value) => switch (value) {
+              'stickers' => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const StickerScreen()),
+                ),
+              _ => null,
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'stickers',
+                child: Text(skipped.isEmpty ? 'Nee/Nee stickers' : 'Nee/Nee stickers (${skipped.length})'),
+              ),
+            ],
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -167,18 +182,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   icon: const Icon(Icons.play_arrow_rounded, size: 28),
                   label: Text(_dayOffset == 0 ? 'Start route' : "Start ${plan.weekdayName}'s route"),
                 ),
-              if (skipped.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const StickerScreen()),
-                  ),
-                  icon: Icon(Icons.do_not_disturb_on_outlined, color: theme.colorScheme.error, size: 18),
-                  label: Text(
-                    '${skipped.length} ${skipped.length == 1 ? 'house' : 'houses'} skipped (Nee/Nee sticker)',
-                  ),
-                ),
-              ],
               if (kid != null) ...[
                 const SizedBox(height: 12),
                 _QuickStats(kid: kid, weekday: _date.weekday),

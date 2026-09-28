@@ -465,6 +465,19 @@ class ImportStatus {
   static bool _same(ImportRun? a, ImportRun? b) => a == null ? b == null : b != null && a.sameAs(b);
 }
 
+/// A change stays on the "what changed" card for this many days, counting the
+/// day it came in. The server applies the same window; doing it here as well
+/// lets a change fade out on the phone without waiting for a new route version.
+const kChangeVisibleDays = 3;
+
+bool isRecentChange(RouteChange change, {DateTime? now}) {
+  final recorded = DateTime.tryParse(change.date);
+  if (recorded == null) return true;
+  final today = now ?? DateTime.now();
+  final cutoff = DateTime(today.year, today.month, today.day - (kChangeVisibleDays - 1));
+  return !recorded.isBefore(cutoff);
+}
+
 class AppConfig {
   AppConfig({
     required this.version,
@@ -477,7 +490,7 @@ class AppConfig {
     List<Extra> extras = const [],
     List<RouteChange> changes = const [],
     this.importStatus,
-  })  : changes = List.unmodifiable(List<RouteChange>.of(changes)),
+  })  : _allChanges = List.unmodifiable(List<RouteChange>.of(changes)),
         kids = List.unmodifiable(List<Kid>.of(kids)..sort(_bySortOrder)),
         routes = List.unmodifiable(List<RouteInfo>.of(routes)..sort(_bySortOrder)),
         products = List.unmodifiable(List<Product>.of(products)..sort(_bySortOrder)),
@@ -506,7 +519,7 @@ class AppConfig {
         byLocation['${normaliseStreet(s.name)}|${a.number}|${a.suffix}'] = a.id;
       }
     }
-    for (final change in this.changes) {
+    for (final change in _allChanges) {
       if (change.number == null) continue;
       final id = byLocation['${normaliseStreet(change.streetName)}|${change.number}|${change.suffix}'];
       if (id != null) _changeByAddress.putIfAbsent(id, () => []).add(change);
@@ -531,7 +544,10 @@ class AppConfig {
   final List<Street> streets;
   final List<Address> addresses;
   final List<Extra> extras;
-  final List<RouteChange> changes;
+  final List<RouteChange> _allChanges;
+
+  /// Changes still worth showing (see [kChangeVisibleDays]).
+  List<RouteChange> get changes => _allChanges.where(isRecentChange).toList(growable: false);
 
   /// Null when the server predates the import log.
   final ImportStatus? importStatus;
@@ -547,7 +563,7 @@ class AppConfig {
         streets: streets,
         addresses: addresses,
         extras: extras,
-        changes: changes,
+        changes: _allChanges,
         importStatus: status,
       );
 
@@ -570,10 +586,11 @@ class AppConfig {
   List<Extra> extrasOn(String date) => _extrasByDate[date] ?? const [];
 
   /// Recent changes affecting one house, if any.
-  List<RouteChange> changesForAddress(int addressId) => _changeByAddress[addressId] ?? const [];
+  List<RouteChange> changesForAddress(int addressId) =>
+      (_changeByAddress[addressId] ?? const []).where(isRecentChange).toList(growable: false);
 
   /// True when this house recently started getting a paper, or moved days.
-  bool isNewlyChanged(int addressId) => _changeByAddress.containsKey(addressId);
+  bool isNewlyChanged(int addressId) => changesForAddress(addressId).isNotEmpty;
 
   /// Houses that recently stopped, which never appear on the route itself.
   List<RouteChange> get stoppedChanges =>
@@ -642,7 +659,7 @@ class AppConfig {
         'streets': streets.map((s) => s.toJson()).toList(),
         'addresses': addresses.map((a) => a.toJson()).toList(),
         'extras': extras.map((e) => e.toJson()).toList(),
-        'changes': changes.map((c) => c.toJson()).toList(),
+        'changes': _allChanges.map((c) => c.toJson()).toList(),
         'import_status': importStatus?.toJson(),
       };
 }

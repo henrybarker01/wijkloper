@@ -216,12 +216,12 @@ void main() {
         Address(id: 1, streetId: 100, number: 1, products: [AddressProduct(productId: 1)]),
         Address(id: 2, streetId: 100, number: 3, products: [AddressProduct(productId: 1)]),
       ],
-      changes: const [
+      changes: [
         // Matching is tolerant of spacing and case in the street name.
         RouteChange(kind: ChangeKind.added, streetName: '  nairacstraat ', number: 3,
-            date: '2026-09-20', productName: 'Barnevelder'),
+            date: dateKey(DateTime.now()), productName: 'Barnevelder'),
         RouteChange(kind: ChangeKind.stopped, streetName: 'Nairacstraat', number: 99,
-            date: '2026-09-20', productName: 'Barnevelder'),
+            date: dateKey(DateTime.now()), productName: 'Barnevelder'),
       ],
     );
     expect(config.hasChanges, isTrue);
@@ -234,6 +234,39 @@ void main() {
     expect(config.whereOf(config.changesForAddress(2).single), 'Nairacstraat 3');
     final copy = AppConfig.fromJson(config.toJson());
     expect(copy.whereOf(copy.changesForAddress(2).single), 'Nairacstraat 3');
+  });
+
+  test('a change fades from the card after three days', () {
+    final now = DateTime.now();
+    RouteChange change(int daysAgo, int number) => RouteChange(
+          kind: ChangeKind.added,
+          streetName: 'Nairacstraat',
+          number: number,
+          date: dateKey(now.subtract(Duration(days: daysAgo))),
+          productName: 'Barnevelder',
+        );
+    final config = AppConfig(
+      version: 1,
+      familyName: 'Test',
+      kids: const [],
+      routes: [const RouteInfo(id: 10, name: 'Route')],
+      products: const [Product(id: 1, name: 'Barnevelder', shortCode: 'B', colorHex: '#1D4ED8', days: {1})],
+      streets: [const Street(id: 100, routeId: 10, name: 'Nairacstraat')],
+      addresses: const [
+        Address(id: 1, streetId: 100, number: 1, products: [AddressProduct(productId: 1)]),
+        Address(id: 2, streetId: 100, number: 3, products: [AddressProduct(productId: 1)]),
+        Address(id: 3, streetId: 100, number: 5, products: [AddressProduct(productId: 1)]),
+      ],
+      changes: [change(0, 1), change(2, 3), change(3, 5)],
+    );
+    // Today and two days ago still show; three days ago is just the route now.
+    expect(config.changes.map((c) => c.number), [1, 3]);
+    expect(config.isNewlyChanged(1), isTrue);
+    expect(config.isNewlyChanged(2), isTrue);
+    expect(config.isNewlyChanged(3), isFalse);
+    // The cache keeps everything; the window is applied when read.
+    expect((config.toJson()['changes'] as List).length, 3);
+    expect(AppConfig.fromJson(config.toJson()).changes.length, 2);
   });
 
   test('marking a whole street done and undoing it', () {

@@ -372,3 +372,21 @@ def test_failed_attempts_are_recorded_and_the_status_tells_them_apart(db):
     status = import_status(db)
     assert status["last_attempt"]["ok"] is False and "503" in status["last_attempt"]["summary"]
     assert status["last_applied"] == good["last_applied"]
+
+
+def test_changes_fall_off_the_card_after_three_days(db):
+    import datetime as dt
+
+    from app.db import today_local
+    from app.importer import apply_import, clear_changes, recent_changes
+
+    apply_import(db, payload([1, 3]))
+    clear_changes(db)
+    apply_import(db, payload([1, 3, 5]))
+    assert len(recent_changes(db)) == 1
+    # The day it came in plus two more rounds, then it is just the route.
+    for age, shown in ((1, True), (2, True), (3, False)):
+        date = (today_local() - dt.timedelta(days=age)).isoformat()
+        db.execute("UPDATE route_changes SET date=?", (date,))
+        db.commit()
+        assert bool(recent_changes(db)) is shown, age

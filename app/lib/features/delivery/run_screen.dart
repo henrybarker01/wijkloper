@@ -107,8 +107,10 @@ class _RunScreenState extends ConsumerState<RunScreen> {
       showDragHandle: true,
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
+        // Clear the phone's own navigation bar, or the last button sits under it.
+        final bottomInset = MediaQuery.viewPaddingOf(sheetContext).bottom;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          padding: EdgeInsets.fromLTRB(20, 0, 20, 24 + bottomInset),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -178,17 +180,7 @@ class _RunScreenState extends ConsumerState<RunScreen> {
     final id = delivery.address.id;
     await ref.read(stickerProvider.notifier).set(id, kStickerNeeNee);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('${street.name} ${delivery.address.label} skipped (Nee/Nee).'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () => ref.read(stickerProvider.notifier).set(id, ''),
-          ),
-        ),
-      );
+    showSnack(context, '${street.name} ${delivery.address.label} skipped. Bring it back under ⋮ › Nee/Nee stickers.');
   }
 
   Future<void> _finish(DayPlan plan, ActiveRunState run, Kid? kid) async {
