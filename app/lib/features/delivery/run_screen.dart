@@ -12,6 +12,7 @@ import '../../core/schedule.dart';
 import '../../widgets/changes_card.dart';
 import '../../widgets/common.dart';
 import 'finish_screen.dart';
+import 'sticker_screen.dart';
 
 /// The live route: timer, "next up", and every house as a colour-coded tile
 /// grouped by street. Tint = the newspaper, ring = an insert (folders), star =
@@ -153,11 +154,41 @@ class _RunScreenState extends ConsumerState<RunScreen> {
                 icon: Icon(done ? Icons.undo : Icons.check),
                 label: Text(done ? 'Undo, not delivered yet' : 'Delivered'),
               ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: theme.colorScheme.error),
+                onPressed: () {
+                  Navigator.pop(sheetContext);
+                  _markNeeNee(delivery, street);
+                },
+                icon: const Icon(Icons.do_not_disturb_on_outlined),
+                label: const Text('Nee/Nee sticker: skip this house'),
+              ),
             ],
           ),
         );
       },
     );
+  }
+
+  /// The kid saw a Nee/Nee sticker: the house leaves the round right away
+  /// (also offline) and can be brought back from the Nee/Nee list.
+  Future<void> _markNeeNee(Delivery delivery, Street street) async {
+    _haptic();
+    final id = delivery.address.id;
+    await ref.read(stickerProvider.notifier).set(id, kStickerNeeNee);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${street.name} ${delivery.address.label} skipped (Nee/Nee).'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => ref.read(stickerProvider.notifier).set(id, ''),
+          ),
+        ),
+      );
   }
 
   Future<void> _finish(DayPlan plan, ActiveRunState run, Kid? kid) async {
@@ -226,7 +257,8 @@ class _RunScreenState extends ConsumerState<RunScreen> {
       );
     }
     final date = DateTime.tryParse(run.date) ?? DateTime.now();
-    final plan = buildDayPlan(config, run.routeId, date);
+    final skipped = ref.watch(skippedAddressIdsProvider);
+    final plan = buildDayPlan(config, run.routeId, date, skip: skipped);
     final kid = config.kidById(run.kidId);
     final done = run.doneAddressIds;
     final doneCount = plan.deliveries.where((d) => done.contains(d.address.id)).length;
@@ -259,13 +291,20 @@ class _RunScreenState extends ConsumerState<RunScreen> {
             onSelected: (value) => switch (value) {
               'collapse' => _setAllCollapsed(plan, true),
               'expand' => _setAllCollapsed(plan, false),
+              'stickers' => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const StickerScreen()),
+                ),
               'cancel' => _cancel(),
               _ => null,
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'collapse', child: Text('Collapse all streets')),
-              PopupMenuItem(value: 'expand', child: Text('Expand all streets')),
-              PopupMenuItem(value: 'cancel', child: Text('Cancel run (discard)')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'collapse', child: Text('Collapse all streets')),
+              const PopupMenuItem(value: 'expand', child: Text('Expand all streets')),
+              PopupMenuItem(
+                value: 'stickers',
+                child: Text(skipped.isEmpty ? 'Nee/Nee stickers' : 'Nee/Nee stickers (${skipped.length})'),
+              ),
+              const PopupMenuItem(value: 'cancel', child: Text('Cancel run (discard)')),
             ],
           ),
         ],

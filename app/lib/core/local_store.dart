@@ -16,6 +16,7 @@ class LocalStore {
   static const configFile = 'config.json';
   static const activeRunFile = 'active_run.json';
   static const pendingRunsFile = 'pending_runs.json';
+  static const pendingStickersFile = 'pending_stickers.json';
 
   static Future<LocalStore> open() async {
     final base = await getApplicationDocumentsDirectory();
@@ -87,6 +88,23 @@ class LocalStore {
 
   Future<void> writePendingRuns(List<RunRecord> runs) =>
       writeJson(pendingRunsFile, runs.map((r) => r.toJson()).toList());
+
+  /// Door stickers marked on the route that the server has not confirmed yet.
+  Future<Map<int, String>> readPendingStickers() async {
+    final json = await readJson(pendingStickersFile);
+    if (json is! Map) return {};
+    final out = <int, String>{};
+    json.forEach((key, value) {
+      final id = int.tryParse('$key');
+      if (id != null && value is String) out[id] = value;
+    });
+    return out;
+  }
+
+  Future<void> writePendingStickers(Map<int, String> pending) => writeJson(
+        pendingStickersFile,
+        pending.isEmpty ? null : {for (final e in pending.entries) '${e.key}': e.value},
+      );
 
   Future<Stats?> readStats(int kidId) async {
     final json = await readJson('stats_$kidId.json');

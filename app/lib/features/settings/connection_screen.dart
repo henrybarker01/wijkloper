@@ -19,6 +19,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
     setState(() => _syncing = true);
     final ok = await ref.read(configProvider.notifier).refresh();
     await ref.read(runSyncProvider.notifier).sync();
+    await ref.read(stickerProvider.notifier).sync();
     if (!mounted) return;
     setState(() => _syncing = false);
     showSnack(context, ok ? 'Up to date.' : (ref.read(configProvider).error ?? 'Could not reach the server.'), error: !ok);

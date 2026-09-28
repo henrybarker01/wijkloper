@@ -356,6 +356,92 @@ class RunSyncNotifier extends Notifier<RunSyncState> {
 
 final runSyncProvider = NotifierProvider<RunSyncNotifier, RunSyncState>(RunSyncNotifier.new);
 
+// --- door stickers ----------------------------------------------------------------------------
+
+/// Nee/Nee stickers marked on the route. The map holds what this phone decided
+/// but the server has not confirmed yet, so a house disappears from the round
+/// the moment the kid marks it, even without a signal. Entries drop out once
+/// the server config reports the same value.
+class StickerNotifier extends Notifier<Map<int, String>> {
+  @override
+  Map<int, String> build() {
+    Future.microtask(_load);
+    ref.listen(configProvider, (previous, next) => _reconcile(next.config));
+    return const {};
+  }
+
+  Future<void> _load() async {
+    final pending = await ref.read(localStoreProvider).readPendingStickers();
+    if (!ref.mounted) return;
+    state = pending;
+    if (pending.isNotEmpty) await sync();
+  }
+
+  void _reconcile(AppConfig? config) {
+    if (config == null || state.isEmpty) return;
+    final next = Map<int, String>.of(state)
+      ..removeWhere((id, sticker) => config.addressById(id)?.sticker == sticker);
+    if (next.length != state.length) {
+      state = next;
+      ref.read(localStoreProvider).writePendingStickers(next);
+    }
+  }
+
+  /// What the house has right now: this phone's pending choice, else the server's.
+  String stickerOf(int addressId, AppConfig config) =>
+      state[addressId] ?? (config.addressById(addressId)?.sticker ?? '');
+
+  Future<void> set(int addressId, String sticker) async {
+    state = {...state, addressId: sticker};
+    await ref.read(localStoreProvider).writePendingStickers(state);
+    await sync();
+  }
+
+  /// Pushes pending stickers to the server; stops at the first network error.
+  Future<void> sync() async {
+    final api = ref.read(apiClientProvider);
+    if (api == null || state.isEmpty) return;
+    final remaining = <int, String>{};
+    var pushed = 0;
+    var offline = false;
+    for (final entry in state.entries.toList()) {
+      if (offline) {
+        remaining[entry.key] = entry.value;
+        continue;
+      }
+      try {
+        await api.setSticker(entry.key, entry.value);
+        pushed++;
+      } on ApiException catch (e) {
+        if (e.isNetwork || e.isUnauthorized) {
+          offline = true;
+          remaining[entry.key] = entry.value;
+        } else if (e.statusCode != 404) {
+          remaining[entry.key] = entry.value; // the house is gone: nothing to keep
+        }
+      }
+    }
+    if (!ref.mounted) return;
+    state = remaining;
+    await ref.read(localStoreProvider).writePendingStickers(remaining);
+    if (pushed > 0) await ref.read(configProvider.notifier).refresh();
+  }
+}
+
+final stickerProvider = NotifierProvider<StickerNotifier, Map<int, String>>(StickerNotifier.new);
+
+/// Houses to leave out of the route because of a Nee/Nee sticker, combining
+/// the server's state with what this phone marked on the way.
+final skippedAddressIdsProvider = Provider<Set<int>>((ref) {
+  final config = ref.watch(configProvider).config;
+  final pending = ref.watch(stickerProvider);
+  if (config == null) return const {};
+  return {
+    for (final a in config.addresses)
+      if ((pending[a.id] ?? a.sticker) == kStickerNeeNee) a.id,
+  };
+});
+
 // --- stats ------------------------------------------------------------------------------------
 
 /// Stats for one kid: fresh from the server when reachable, otherwise the last cached copy.

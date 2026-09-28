@@ -96,6 +96,26 @@ void main() {
     expect(tuesday.extras, isEmpty);
   });
 
+  test('houses with a Nee/Nee sticker are left out of the plan and the packing', () {
+    final config = _config();
+    final normal = buildDayPlan(config, 10, monday);
+    expect(normal.deliveries.map((d) => d.address.number), [1, 3, 6]);
+
+    final plan = buildDayPlan(config, 10, monday, skip: {3});
+    expect(plan.deliveries.map((d) => d.address.number), [1, 6]);
+    expect(plan.totalStops, 2);
+    expect(plan.countByProduct, {1: 2});
+    expect(plan.packing.single.count, 2);
+  });
+
+  test('address JSON keeps the sticker', () {
+    const house = Address(id: 9, streetId: 100, number: 12, sticker: kStickerNeeNee);
+    expect(house.hasNeeNee, isTrue);
+    final copy = Address.fromJson(house.toJson());
+    expect(copy.sticker, kStickerNeeNee);
+    expect(Address.fromJson(const {'id': 1, 'street_id': 100, 'number': 2}).hasNeeNee, isFalse);
+  });
+
   test('unknown route yields an empty plan', () {
     expect(buildDayPlan(_config(), 999, monday).totalStops, 0);
     expect(buildDayPlan(_config(), null, monday).totalStops, 0);

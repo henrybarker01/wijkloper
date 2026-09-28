@@ -98,6 +98,7 @@ def build_config(db: sqlite3.Connection) -> Dict[str, Any]:
             "suffix": r["suffix"],
             "note": r["note"],
             "sort_order": r["sort_order"],
+            "sticker": r["sticker"],
             "products": assignments.get(r["id"], []),
         }
         for r in db.execute(

@@ -369,9 +369,10 @@ def update_address(address_id: int, body: AddressUpdate, db: sqlite3.Connection 
     ).fetchone()
     if clash:
         raise HTTPException(status.HTTP_409_CONFLICT, "That house number already exists in this street")
+    sticker = body.sticker if body.sticker is not None else address["sticker"]
     db.execute(
-        "UPDATE addresses SET number=?, suffix=?, note=? WHERE id=?",
-        (number, suffix, note, address_id),
+        "UPDATE addresses SET number=?, suffix=?, note=?, sticker=? WHERE id=?",
+        (number, suffix, note, sticker, address_id),
     )
     if body.products is not None:
         _replace_assignments(db, address_id, body.products)

@@ -12,9 +12,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from ..auth import PARENT_SESSION_HOURS, require_device
 from ..config_builder import build_config
-from ..db import get_db, get_setting, now_iso, token_hash, verify_secret
+from ..db import bump_config_version, get_db, get_setting, now_iso, today_local, token_hash, verify_secret
 from ..ratelimit import FAIL_DELAY, client_ip, pin_limiter
-from ..schemas import ParentLogin, RunUpload
+from ..schemas import ParentLogin, RunUpload, StickerIn
 from ..stats import compute_stats, run_to_dict
 
 router = APIRouter(prefix="/api", tags=["device"])
@@ -74,6 +74,48 @@ def upload_run(
     )
     db.commit()
     return {"id": cur.lastrowid, "duplicate": False, "stats": compute_stats(db, kid_id)}
+
+
+@router.put("/addresses/{address_id}/sticker")
+def set_sticker(
+    address_id: int,
+    body: StickerIn,
+    device: sqlite3.Row = Depends(require_device),
+    db: sqlite3.Connection = Depends(get_db),
+):
+    """Mark a door sticker seen on the route (or clear it). No parent PIN needed:
+    the kid standing at the door is the one who knows."""
+    address = db.execute(
+        "SELECT a.*, s.name AS street_name FROM addresses a JOIN streets s ON s.id = a.street_id WHERE a.id=?",
+        (address_id,),
+    ).fetchone()
+    if address is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "House not found")
+    if address["sticker"] == body.sticker:
+        return {"ok": True, "unchanged": True, "version": int(get_setting(db, "config_version", "1") or 1)}
+    db.execute("UPDATE addresses SET sticker=? WHERE id=?", (body.sticker, address_id))
+    # Tell the other phones through the "what changed" feed. Only the latest
+    # sticker state of a house is kept there, and undoing a mark made earlier
+    # today is a slip of the thumb rather than news.
+    where = (address["street_name"], address["number"], address["suffix"])
+    today = today_local().isoformat()
+    slip = body.sticker == "" and db.execute(
+        "SELECT 1 FROM route_changes WHERE kind='sticker' AND street_name=? AND number=? AND suffix=? AND date=?",
+        where + (today,),
+    ).fetchone() is not None
+    db.execute("DELETE FROM route_changes WHERE kind='sticker' AND street_name=? AND number=? AND suffix=?", where)
+    if not slip:
+        db.execute(
+            "INSERT INTO route_changes(kind, street_name, number, suffix, product_id, product_name, "
+            "days, detail, date, created_at) VALUES ('sticker',?,?,?,NULL,'',NULL,?,?,?)",
+            where + (
+                "Nee/Nee sticker, skip this house" if body.sticker == "nee_nee" else "sticker removed, deliver again",
+                today, now_iso(),
+            ),
+        )
+    version = bump_config_version(db)
+    db.commit()
+    return {"ok": True, "unchanged": False, "version": version}
 
 
 @router.get("/runs")

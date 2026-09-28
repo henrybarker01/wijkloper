@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS addresses (
     suffix     TEXT NOT NULL DEFAULT '',
     note       TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
+    -- Dutch door sticker. '' = none, 'nee_nee' = no advertising and no free
+    -- papers, so the house is skipped. Kept apart from the product links so
+    -- an import from the distributor never overwrites it.
+    sticker    TEXT NOT NULL DEFAULT '',
     UNIQUE(street_id, number, suffix)
 );
 CREATE TABLE IF NOT EXISTS address_products (
@@ -150,6 +154,9 @@ CREATE TABLE IF NOT EXISTS route_changes (
 );
 CREATE INDEX IF NOT EXISTS idx_route_changes_date ON route_changes(date);
 """
+
+# Door stickers we understand. '' means none.
+STICKERS = ("", "nee_nee")
 
 NUMBER_ORDERS = (
     "asc",
@@ -271,11 +278,20 @@ def days_from_list(days: Optional[List[int]]) -> Optional[str]:
 
 # --- init -------------------------------------------------------------------
 
+def _ensure_column(db: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Add a column to an existing table; CREATE TABLE IF NOT EXISTS won't."""
+    existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     """Create tables, default settings and seed data on first start."""
     db = connect()
     try:
         db.executescript(SCHEMA)
+        # Columns added after the first release, for databases created earlier.
+        _ensure_column(db, "addresses", "sticker", "sticker TEXT NOT NULL DEFAULT ''")
         if get_setting(db, "config_version") is None:
             set_setting(db, "config_version", "1")
         if get_setting(db, "family_name") is None:

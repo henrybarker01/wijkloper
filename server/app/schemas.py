@@ -5,7 +5,24 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from .db import NUMBER_ORDERS
+from .db import NUMBER_ORDERS, STICKERS
+
+
+def _check_sticker(value: Optional[str]) -> Optional[str]:
+    if value is not None and value not in STICKERS:
+        raise ValueError("sticker must be one of: " + ", ".join(repr(s) for s in STICKERS))
+    return value
+
+
+class StickerIn(BaseModel):
+    """Set or clear the door sticker on a house. Kids may do this from the route."""
+
+    sticker: str = ""
+
+    @field_validator("sticker")
+    @classmethod
+    def _valid(cls, value: str) -> str:
+        return _check_sticker(value) or ""
 
 
 class PairRequest(BaseModel):
@@ -117,7 +134,13 @@ class AddressUpdate(BaseModel):
     number: Optional[int] = Field(default=None, ge=0, le=99999)
     suffix: Optional[str] = Field(default=None, max_length=10)
     note: Optional[str] = Field(default=None, max_length=200)
+    sticker: Optional[str] = None
     products: Optional[List[AddressProductIn]] = None  # replaces all assignments when given
+
+    @field_validator("sticker")
+    @classmethod
+    def _valid_sticker(cls, value: Optional[str]) -> Optional[str]:
+        return _check_sticker(value)
 
 
 class BulkAddresses(BaseModel):

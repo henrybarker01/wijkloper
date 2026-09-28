@@ -403,11 +403,18 @@ class _HouseTile extends StatelessWidget {
                 children: [
                   Text(
                     address.label,
-                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: address.hasNeeNee ? theme.colorScheme.outline : null,
+                      decoration: address.hasNeeNee ? TextDecoration.lineThrough : null,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (address.note.isNotEmpty) ...[
+                  if (address.hasNeeNee) ...[
+                    const SizedBox(width: 2),
+                    Icon(Icons.do_not_disturb_on, size: 14, color: theme.colorScheme.error),
+                  ] else if (address.note.isNotEmpty) ...[
                     const SizedBox(width: 2),
                     Icon(Icons.sticky_note_2_outlined, size: 14, color: theme.colorScheme.outline),
                   ],
@@ -719,6 +726,7 @@ class _AddressEditorState extends ConsumerState<_AddressEditor> {
   late final Map<int, Set<int>?> _assigned = {
     for (final ap in widget.address.products) ap.productId: ap.days == null ? null : Set<int>.of(ap.days!),
   };
+  late bool _neeNee = widget.address.hasNeeNee;
   bool _busy = false;
 
   @override
@@ -743,6 +751,7 @@ class _AddressEditorState extends ConsumerState<_AddressEditor> {
         'number': number,
         'suffix': _suffix.text.trim(),
         'note': _note.text.trim(),
+        'sticker': _neeNee ? kStickerNeeNee : '',
         'products': [
           for (final e in _assigned.entries)
             {'product_id': e.key, 'days': e.value == null ? null : (e.value!.toList()..sort())},
@@ -799,7 +808,14 @@ class _AddressEditorState extends ConsumerState<_AddressEditor> {
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(labelText: 'Note for the kid', hintText: 'Big dog! / letterbox at the side'),
           ),
-          const SizedBox(height: 12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Nee/Nee sticker on the door'),
+            subtitle: const Text('The house is skipped on every round while this is on'),
+            value: _neeNee,
+            onChanged: (v) => setState(() => _neeNee = v),
+          ),
+          const SizedBox(height: 4),
           Text('Gets', style: theme.textTheme.labelLarge),
           for (final p in products) ...[
             SwitchListTile(

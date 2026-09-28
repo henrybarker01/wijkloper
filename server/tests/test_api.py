@@ -278,6 +278,66 @@ def test_extra_delivery_days(client, device, parent):
     client.delete("/api/admin/streets/%d" % street, headers=parent)
 
 
+def test_kid_can_mark_and_clear_a_nee_nee_sticker(client, device, parent):
+    cfg = client.get("/api/config", headers=device).json()
+    route_id = cfg["routes"][0]["id"]
+    street = client.post("/api/admin/routes/%d/streets" % route_id, json={"name": "Stickerstraat"}, headers=parent).json()["id"]
+    house = client.post("/api/admin/streets/%d/addresses" % street, json={"number": 12}, headers=parent).json()["id"]
+    before = client.get("/api/config", headers=device).json()
+    assert next(a for a in before["addresses"] if a["id"] == house)["sticker"] == ""
+
+    # A kid, with only the device token, marks the sticker.
+    r = client.put("/api/addresses/%d/sticker" % house, json={"sticker": "nee_nee"}, headers=device)
+    assert r.status_code == 200, r.text
+    assert r.json()["unchanged"] is False
+    after = client.get("/api/config", headers=device).json()
+    assert after["version"] > before["version"]
+    assert next(a for a in after["addresses"] if a["id"] == house)["sticker"] == "nee_nee"
+    # The other phones learn about it through the change feed.
+    change = next(c for c in after["changes"] if c["kind"] == "sticker")
+    assert (change["street_name"], change["number"]) == ("Stickerstraat", 12)
+    assert "skip" in change["detail"]
+
+    # Same value again is a no-op that does not bump the version.
+    r = client.put("/api/addresses/%d/sticker" % house, json={"sticker": "nee_nee"}, headers=device)
+    assert r.json()["unchanged"] is True
+
+    # Sticker gone: the house is delivered again. Undoing today's own mark is a
+    # slip of the thumb, so the feed forgets the whole thing instead of showing
+    # "skip" and "deliver again" for the same door.
+    r = client.put("/api/addresses/%d/sticker" % house, json={"sticker": ""}, headers=device)
+    assert r.json()["unchanged"] is False
+    final = client.get("/api/config", headers=device).json()
+    assert next(a for a in final["addresses"] if a["id"] == house)["sticker"] == ""
+    assert [c for c in final["changes"] if c["kind"] == "sticker"] == []
+
+    # A sticker that was marked on an earlier day and is now gone is news.
+    client.put("/api/addresses/%d/sticker" % house, json={"sticker": "nee_nee"}, headers=device)
+    from app.db import connect
+
+    db = connect()
+    try:
+        db.execute("UPDATE route_changes SET date=? WHERE kind='sticker'", ("2020-01-01",))
+        db.commit()
+    finally:
+        db.close()
+    client.put("/api/addresses/%d/sticker" % house, json={"sticker": ""}, headers=device)
+    stickers = [c for c in client.get("/api/config", headers=device).json()["changes"] if c["kind"] == "sticker"]
+    assert len(stickers) == 1 and "deliver again" in stickers[0]["detail"]
+
+    # Unknown stickers and unknown houses are rejected.
+    assert client.put("/api/addresses/%d/sticker" % house, json={"sticker": "ja_ja"}, headers=device).status_code == 422
+    assert client.put("/api/addresses/999999/sticker", json={"sticker": "nee_nee"}, headers=device).status_code == 404
+    # And it needs a device token.
+    assert client.put("/api/addresses/%d/sticker" % house, json={"sticker": "nee_nee"}).status_code == 401
+
+    # Parents can set it too, through the normal address edit.
+    r = client.put("/api/admin/addresses/%d" % house, json={"sticker": "nee_nee"}, headers=parent)
+    assert r.status_code == 200, r.text
+    assert next(a for a in client.get("/api/config", headers=device).json()["addresses"] if a["id"] == house)["sticker"] == "nee_nee"
+    client.delete("/api/admin/streets/%d" % street, headers=parent)
+
+
 def test_pairing_locks_out_after_repeated_failures(client):
     from app.ratelimit import pair_limiter
 

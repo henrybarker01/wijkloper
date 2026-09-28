@@ -260,7 +260,9 @@ List<Address> orderAddresses(List<Address> addresses, NumberOrder order) {
 }
 
 /// Builds the plan for [routeId] on [date]. Streets without stops are omitted.
-DayPlan buildDayPlan(AppConfig config, int? routeId, DateTime date) {
+/// Houses in [skip] (a Nee/Nee sticker on the door) are left out entirely, so
+/// they count in neither the stops nor the papers to pack.
+DayPlan buildDayPlan(AppConfig config, int? routeId, DateTime date, {Set<int> skip = const {}}) {
   final route = config.routeById(routeId);
   final streetPlans = <StreetPlan>[];
   if (route != null) {
@@ -268,6 +270,7 @@ DayPlan buildDayPlan(AppConfig config, int? routeId, DateTime date) {
       final ordered = orderAddresses(config.addressesForStreet(street.id), street.numberOrder);
       final deliveries = <Delivery>[];
       for (final address in ordered) {
+        if (skip.contains(address.id)) continue;
         final today = productsFor(config, address, date);
         if (today.products.isNotEmpty) {
           deliveries.add(Delivery(address: address, products: today.products, extraProductIds: today.extraIds));

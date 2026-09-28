@@ -10,6 +10,7 @@ import '../../core/schedule.dart';
 import '../../widgets/changes_card.dart';
 import '../../widgets/common.dart';
 import '../delivery/run_screen.dart';
+import '../delivery/sticker_screen.dart';
 import '../parent/parent_gate.dart';
 import '../settings/connection_screen.dart';
 import '../stats/stats_screen.dart';
@@ -93,7 +94,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final activeRun = ref.watch(activeRunProvider);
     final sync = ref.watch(runSyncProvider);
     final routeId = config == null ? null : pickRouteId(config, kid);
-    final plan = config == null ? null : buildDayPlan(config, routeId, _date);
+    final skipped = ref.watch(skippedAddressIdsProvider);
+    final plan = config == null ? null : buildDayPlan(config, routeId, _date, skip: skipped);
 
     return Scaffold(
       appBar: AppBar(
@@ -162,6 +164,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   icon: const Icon(Icons.play_arrow_rounded, size: 28),
                   label: Text(_dayOffset == 0 ? 'Start route' : "Start ${plan.weekdayName}'s route"),
                 ),
+              if (skipped.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const StickerScreen()),
+                  ),
+                  icon: Icon(Icons.do_not_disturb_on_outlined, color: theme.colorScheme.error, size: 18),
+                  label: Text(
+                    '${skipped.length} ${skipped.length == 1 ? 'house' : 'houses'} skipped (Nee/Nee sticker)',
+                  ),
+                ),
+              ],
               if (kid != null) ...[
                 const SizedBox(height: 12),
                 _QuickStats(kid: kid, weekday: _date.weekday),

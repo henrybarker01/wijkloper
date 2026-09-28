@@ -333,6 +333,17 @@ def test_changes_can_be_cleared(db):
     assert recent_changes(db) == []
 
 
+def test_an_import_never_touches_a_sticker(db):
+    from app.importer import apply_import
+
+    apply_import(db, payload([1, 3]))
+    db.execute("UPDATE addresses SET sticker='nee_nee' WHERE number=3")
+    db.commit()
+    apply_import(db, payload([1, 3, 5]))
+    row = db.execute("SELECT sticker FROM addresses WHERE number=3").fetchone()
+    assert row["sticker"] == "nee_nee"
+
+
 def test_every_run_is_recorded(db):
     from app.importer import apply_import, recent_imports
 

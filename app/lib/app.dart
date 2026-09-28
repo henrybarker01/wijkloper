@@ -32,6 +32,7 @@ class _WijkloperAppState extends ConsumerState<WijkloperApp> with WidgetsBinding
     if (state == AppLifecycleState.resumed) {
       ref.read(configProvider.notifier).refresh();
       ref.read(runSyncProvider.notifier).sync();
+      ref.read(stickerProvider.notifier).sync();
     }
   }
 

@@ -247,6 +247,13 @@ class ApiClient {
     );
   }
 
+  /// Sets or clears the door sticker on a house. Returns false when the server
+  /// already had that value.
+  Future<bool> setSticker(int addressId, String sticker) async {
+    final json = await put('/api/addresses/$addressId/sticker', {'sticker': sticker});
+    return (json['unchanged'] as bool?) != true;
+  }
+
   Future<Stats> fetchStats(int? kidId) async {
     final json = await get('/api/stats', query: kidId == null ? null : {'kid_id': '$kidId'});
     return Stats.fromJson(json, fetchedAt: DateTime.now());

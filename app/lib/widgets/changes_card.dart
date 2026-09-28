@@ -18,18 +18,20 @@ class ChangesCard extends StatelessWidget {
   static const _stopped = Color(0xFFD25049);
   static const _days = Color(0xFF3B5BD9);
 
-  static Color _colourFor(ChangeKind kind) => switch (kind) {
+  static Color _colourFor(RouteChange change) => switch (change.kind) {
         ChangeKind.added => _added,
         ChangeKind.stopped => _stopped,
         ChangeKind.days => _days,
         ChangeKind.street => _added,
+        ChangeKind.sticker => change.isSkip ? _stopped : _added,
       };
 
-  static IconData _iconFor(ChangeKind kind) => switch (kind) {
+  static IconData _iconFor(RouteChange change) => switch (change.kind) {
         ChangeKind.added => Icons.add_circle,
         ChangeKind.stopped => Icons.cancel,
         ChangeKind.days => Icons.event_repeat,
         ChangeKind.street => Icons.add_road,
+        ChangeKind.sticker => change.isSkip ? Icons.do_not_disturb_on : Icons.check_circle,
       };
 
   static String _describe(RouteChange change) => switch (change.kind) {
@@ -39,6 +41,7 @@ class ChangesCard extends StatelessWidget {
             ? 'back to the usual days'
             : 'only on ${daysLabel(change.days!.split(',').map(int.parse).toSet())}',
         ChangeKind.street => 'new street, ${change.detail}',
+        ChangeKind.sticker => change.isSkip ? 'Nee/Nee sticker, skip this house' : 'sticker gone, deliver again',
       };
 
   /// "2 new, 1 stopped"
@@ -54,6 +57,9 @@ class ChangesCard extends StatelessWidget {
     if ((counts[ChangeKind.added] ?? 0) > 0) parts.add('${counts[ChangeKind.added]} new');
     if ((counts[ChangeKind.stopped] ?? 0) > 0) parts.add('${counts[ChangeKind.stopped]} stopped');
     if ((counts[ChangeKind.days] ?? 0) > 0) parts.add('${counts[ChangeKind.days]} changed days');
+    if ((counts[ChangeKind.sticker] ?? 0) > 0) {
+      parts.add('${counts[ChangeKind.sticker]} ${counts[ChangeKind.sticker] == 1 ? 'sticker' : 'stickers'}');
+    }
     return parts.join(' · ');
   }
 
@@ -89,10 +95,12 @@ class ChangesCard extends StatelessWidget {
       );
     }
 
-    // Stopped first: it is the one a kid walking from memory gets wrong.
+    // Stopped and Nee/Nee first: those are the ones a kid walking from memory
+    // gets wrong.
+    bool skipNow(RouteChange c) => c.kind == ChangeKind.stopped || c.isSkip;
     final ordered = [
-      ...config.changes.where((c) => c.kind == ChangeKind.stopped),
-      ...config.changes.where((c) => c.kind != ChangeKind.stopped),
+      ...config.changes.where(skipNow),
+      ...config.changes.where((c) => !skipNow(c)),
     ];
 
     return Container(
@@ -106,16 +114,22 @@ class ChangesCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(Icons.campaign_rounded, color: tintedInk(_added, scheme)),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'Watch out, this changed',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Watch out, this changed',
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    Text(summarise(config), style: theme.textTheme.labelMedium),
+                  ],
                 ),
               ),
-              Text(summarise(config), style: theme.textTheme.labelMedium),
             ],
           ),
           const SizedBox(height: 10),
@@ -125,7 +139,7 @@ class ChangesCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(_iconFor(change.kind), size: 20, color: _colourFor(change.kind)),
+                  Icon(_iconFor(change), size: 20, color: _colourFor(change)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: RichText(

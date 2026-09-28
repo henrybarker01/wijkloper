@@ -200,6 +200,9 @@ class AddressProduct {
       };
 }
 
+/// Dutch door sticker meaning "no advertising, no free papers": skip the house.
+const kStickerNeeNee = 'nee_nee';
+
 class Address {
   const Address({
     required this.id,
@@ -208,6 +211,7 @@ class Address {
     this.suffix = '',
     this.note = '',
     this.sortOrder = 0,
+    this.sticker = '',
     this.products = const [],
   });
 
@@ -217,10 +221,14 @@ class Address {
   final String suffix;
   final String note;
   final int sortOrder;
+
+  /// '' or [kStickerNeeNee], as last synced from the server.
+  final String sticker;
   final List<AddressProduct> products;
 
   String get label => '$number$suffix';
   bool get isOdd => number.isOdd;
+  bool get hasNeeNee => sticker == kStickerNeeNee;
 
   AddressProduct? assignmentFor(int productId) {
     for (final p in products) {
@@ -236,6 +244,7 @@ class Address {
         suffix: (j['suffix'] as String?) ?? '',
         note: (j['note'] as String?) ?? '',
         sortOrder: (j['sort_order'] as int?) ?? 0,
+        sticker: (j['sticker'] as String?) ?? '',
         products: ((j['products'] as List?) ?? const [])
             .map((e) => AddressProduct.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -248,6 +257,7 @@ class Address {
         'suffix': suffix,
         'note': note,
         'sort_order': sortOrder,
+        'sticker': sticker,
         'products': products.map((p) => p.toJson()).toList(),
       };
 }
@@ -294,7 +304,10 @@ enum ChangeKind {
   added,
   stopped,
   days,
-  street;
+  street,
+
+  /// A Nee/Nee door sticker went on or came off a house.
+  sticker;
 
   static ChangeKind parse(String? value) => ChangeKind.values.firstWhere(
         (k) => k.name == value,
@@ -327,6 +340,10 @@ class RouteChange {
 
   /// "De Heus Plein 65", or just the street for a new street.
   String get where => number == null ? streetName : '$streetName $number$suffix';
+
+  /// A sticker change that takes the house out of the round (as opposed to a
+  /// sticker that was removed, which brings it back).
+  bool get isSkip => kind == ChangeKind.sticker && detail.contains('skip');
 
   factory RouteChange.fromJson(Map<String, dynamic> j) => RouteChange(
         kind: ChangeKind.parse(j['kind'] as String?),
