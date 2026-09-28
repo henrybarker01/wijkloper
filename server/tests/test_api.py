@@ -41,6 +41,7 @@ def test_health_and_index(client):
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["app"] == "wijkloper"
+    assert "last_import_at" in r.json()
     assert "Wijkloper" in client.get("/").text
 
 
@@ -64,6 +65,7 @@ def test_default_config(client, device):
     assert cfg["products"][1]["kind"] == "insert"
     assert len(cfg["routes"]) == 1
     assert cfg["version"] == 1
+    assert cfg["import_status"] == {"last_attempt": None, "last_applied": None}
 
 
 def test_parent_login_rejects_wrong_pin(client, device):
@@ -144,7 +146,10 @@ def test_full_route_setup_flow(client, device, parent):
 
     # Unchanged short-circuit.
     r = client.get("/api/config?known_version=%d" % cfg2["version"], headers=device)
-    assert r.json() == {"unchanged": True, "version": cfg2["version"]}
+    unchanged = r.json()
+    assert unchanged["unchanged"] is True and unchanged["version"] == cfg2["version"]
+    # The import status rides along even when the route did not change.
+    assert set(unchanged["import_status"]) == {"last_attempt", "last_applied"}
 
     # Edit a single address: note + explicit product list.
     r = client.put(

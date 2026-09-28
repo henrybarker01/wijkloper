@@ -108,7 +108,7 @@ def main(argv=None) -> int:
         if command == "sync-spreadit":
             import os
 
-            from .importer import ImportError_, apply_import
+            from .importer import ImportError_, apply_import, record_failure
             from .sources.spreadit import PortalError, fetch
 
             dry_run = "--dry-run" in argv
@@ -120,6 +120,7 @@ def main(argv=None) -> int:
                 p.strip() for p in (os.environ.get("SPREADIT_PRODUCTS") or "").split(",") if p.strip()
             ]
             if not (username and password and district):
+                record_failure(db, "spread-it", district or "", "credentials not set (SPREADIT_* in .env)")
                 print(
                     "Set SPREADIT_USERNAME, SPREADIT_PASSWORD and SPREADIT_DISTRICT "
                     "(and ideally SPREADIT_PRODUCTS).",
@@ -129,6 +130,7 @@ def main(argv=None) -> int:
             try:
                 payload = fetch(username, password, district, include_products=products or None)
             except PortalError as err:
+                record_failure(db, "spread-it", district, f"could not read the portal: {err}")
                 print(f"Could not read the portal: {err}", file=sys.stderr)
                 return 1
             houses = sum(len(s["addresses"]) for s in payload["streets"])
@@ -139,6 +141,7 @@ def main(argv=None) -> int:
             try:
                 report = apply_import(db, payload, dry_run=dry_run, force=force)
             except ImportError_ as err:
+                record_failure(db, "spread-it", district, f"unusable list: {err}")
                 print(f"Import refused: {err}", file=sys.stderr)
                 return 1
             counts = report["counts"]
@@ -177,7 +180,7 @@ def main(argv=None) -> int:
             from .importer import recent_imports
 
             for row in recent_imports(db):
-                flag = "ok " if row["ok"] else "REFUSED"
+                flag = "ok " if row["ok"] else ("FAILED " if row["summary"].startswith("failed:") else "REFUSED")
                 applied = "applied" if row["applied"] else "not applied"
                 print(f"{row['ran_at']}  {flag}  {applied:<11}  {row['source']}/{row['district']}  {row['summary']}")
             return 0

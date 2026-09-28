@@ -373,6 +373,98 @@ class RouteChange {
 String normaliseStreet(String name) => name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
 
 /// The complete route configuration as served by `GET /api/config`.
+// --- nightly import status ----------------------------------------------------
+
+/// One run of the subscriber-list import on the server.
+class ImportRun {
+  const ImportRun({
+    required this.ranAt,
+    required this.ok,
+    required this.applied,
+    this.summary = '',
+    this.source = '',
+  });
+
+  /// Local time.
+  final DateTime ranAt;
+  final bool ok;
+  final bool applied;
+  final String summary;
+  final String source;
+
+  /// The summary without the server's "failed: " / "dry run: " prefix.
+  String get message => summary.replaceFirst(RegExp(r'^(failed|refused|dry run): '), '');
+
+  static ImportRun? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    final ranAt = DateTime.tryParse((j['ran_at'] as String?) ?? '');
+    if (ranAt == null) return null;
+    return ImportRun(
+      ranAt: ranAt.toLocal(),
+      ok: (j['ok'] as bool?) ?? false,
+      applied: (j['applied'] as bool?) ?? false,
+      summary: (j['summary'] as String?) ?? '',
+      source: (j['source'] as String?) ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'ran_at': ranAt.toUtc().toIso8601String(),
+        'ok': ok,
+        'applied': applied,
+        'summary': summary,
+        'source': source,
+      };
+
+  bool sameAs(ImportRun other) =>
+      ranAt == other.ranAt && ok == other.ok && applied == other.applied && summary == other.summary;
+}
+
+enum ImportProblem { none, failed, stale }
+
+/// When the subscriber list was last pulled from the distributor's portal, so
+/// the family can tell whether the route on the phone is current.
+class ImportStatus {
+  const ImportStatus({this.lastAttempt, this.lastApplied});
+
+  /// The most recent run, which may have failed.
+  final ImportRun? lastAttempt;
+
+  /// The most recent run that really updated (or confirmed) the route.
+  final ImportRun? lastApplied;
+
+  /// The nightly job runs once a day; a day and a half without a successful
+  /// import means it is broken (cron stopped, portal down, password changed).
+  static const staleAfter = Duration(hours: 36);
+
+  /// No import has ever run on this server: nothing to report.
+  bool get isEmpty => lastAttempt == null && lastApplied == null;
+
+  ImportProblem problem(DateTime now) {
+    if (isEmpty) return ImportProblem.none;
+    if (lastAttempt != null && !lastAttempt!.ok) return ImportProblem.failed;
+    if (lastApplied == null || now.difference(lastApplied!.ranAt) > staleAfter) return ImportProblem.stale;
+    return ImportProblem.none;
+  }
+
+  factory ImportStatus.fromJson(Map<String, dynamic> j) => ImportStatus(
+        lastAttempt: ImportRun.fromJson(_map(j['last_attempt'])),
+        lastApplied: ImportRun.fromJson(_map(j['last_applied'])),
+      );
+
+  static Map<String, dynamic>? _map(Object? value) => value is Map ? Map<String, dynamic>.from(value) : null;
+
+  Map<String, dynamic> toJson() => {
+        'last_attempt': lastAttempt?.toJson(),
+        'last_applied': lastApplied?.toJson(),
+      };
+
+  bool sameAs(ImportStatus other) =>
+      _same(lastAttempt, other.lastAttempt) && _same(lastApplied, other.lastApplied);
+
+  static bool _same(ImportRun? a, ImportRun? b) => a == null ? b == null : b != null && a.sameAs(b);
+}
+
 class AppConfig {
   AppConfig({
     required this.version,
@@ -384,6 +476,7 @@ class AppConfig {
     required List<Address> addresses,
     List<Extra> extras = const [],
     List<RouteChange> changes = const [],
+    this.importStatus,
   })  : changes = List.unmodifiable(List<RouteChange>.of(changes)),
         kids = List.unmodifiable(List<Kid>.of(kids)..sort(_bySortOrder)),
         routes = List.unmodifiable(List<RouteInfo>.of(routes)..sort(_bySortOrder)),
@@ -439,6 +532,24 @@ class AppConfig {
   final List<Address> addresses;
   final List<Extra> extras;
   final List<RouteChange> changes;
+
+  /// Null when the server predates the import log.
+  final ImportStatus? importStatus;
+
+  /// The same route with a newer import status (the server sends one even
+  /// when the route itself is unchanged).
+  AppConfig withImportStatus(ImportStatus status) => AppConfig(
+        version: version,
+        familyName: familyName,
+        kids: kids,
+        routes: routes,
+        products: products,
+        streets: streets,
+        addresses: addresses,
+        extras: extras,
+        changes: changes,
+        importStatus: status,
+      );
 
   final Map<int, Product> _productById = {};
   final Map<int, Street> _streetById = {};
@@ -517,6 +628,9 @@ class AppConfig {
         changes: ((j['changes'] as List?) ?? const [])
             .map((e) => RouteChange.fromJson(e as Map<String, dynamic>))
             .toList(),
+        importStatus: j['import_status'] is Map
+            ? ImportStatus.fromJson(Map<String, dynamic>.from(j['import_status'] as Map))
+            : null,
       );
 
   Map<String, dynamic> toJson() => {
@@ -529,6 +643,7 @@ class AppConfig {
         'addresses': addresses.map((a) => a.toJson()).toList(),
         'extras': extras.map((e) => e.toJson()).toList(),
         'changes': changes.map((c) => c.toJson()).toList(),
+        'import_status': importStatus?.toJson(),
       };
 }
 

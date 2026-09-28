@@ -111,7 +111,7 @@ def build_config(db: sqlite3.Connection) -> Dict[str, Any]:
     # Phones only need upcoming extras (plus yesterday, for late uploads around midnight).
     since = (today_local() - dt.timedelta(days=1)).isoformat()
 
-    from .importer import recent_changes
+    from .importer import import_status, recent_changes
 
     return {
         "version": version,
@@ -125,4 +125,6 @@ def build_config(db: sqlite3.Connection) -> Dict[str, Any]:
         # What changed on the round lately, so the kids notice houses that were
         # added or stopped instead of walking the route from memory.
         "changes": recent_changes(db),
+        # When the subscriber list was last pulled from the distributor.
+        "import_status": import_status(db),
     }

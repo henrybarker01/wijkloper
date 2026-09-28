@@ -116,6 +116,42 @@ void main() {
     expect(Address.fromJson(const {'id': 1, 'street_id': 100, 'number': 2}).hasNeeNee, isFalse);
   });
 
+  test('import status: fresh, stale and failed nights', () {
+    final now = DateTime(2026, 9, 28, 8);
+    ImportRun run(DateTime at, {bool ok = true, bool applied = true, String summary = ''}) =>
+        ImportRun(ranAt: at, ok: ok, applied: applied, summary: summary, source: 'spread-it');
+
+    expect(const ImportStatus().problem(now), ImportProblem.none);
+    final fresh = ImportStatus(
+      lastAttempt: run(DateTime(2026, 9, 28, 4, 20)),
+      lastApplied: run(DateTime(2026, 9, 28, 4, 20), summary: '0 added, 0 stopped'),
+    );
+    expect(fresh.problem(now), ImportProblem.none);
+    final stale = ImportStatus(
+      lastAttempt: run(DateTime(2026, 9, 26, 4, 20)),
+      lastApplied: run(DateTime(2026, 9, 26, 4, 20)),
+    );
+    expect(stale.problem(now), ImportProblem.stale);
+    final failed = ImportStatus(
+      lastAttempt: run(DateTime(2026, 9, 28, 4, 20),
+          ok: false, applied: false, summary: 'failed: could not read the portal: HTTP 503'),
+      lastApplied: run(DateTime(2026, 9, 27, 4, 20)),
+    );
+    expect(failed.problem(now), ImportProblem.failed);
+    expect(failed.lastAttempt!.message, 'could not read the portal: HTTP 503');
+    final dryRunOnly = ImportStatus(lastAttempt: run(now, applied: false, summary: 'dry run: 0 added'));
+    expect(dryRunOnly.problem(now), ImportProblem.stale);
+
+    final copy = ImportStatus.fromJson(failed.toJson());
+    expect(copy.sameAs(failed), isTrue);
+    expect(copy.sameAs(fresh), isFalse);
+    expect(ImportStatus.fromJson(const {'last_attempt': null, 'last_applied': null}).isEmpty, isTrue);
+
+    final config = _config().withImportStatus(fresh);
+    expect(AppConfig.fromJson(config.toJson()).importStatus!.sameAs(fresh), isTrue);
+    expect(AppConfig.fromJson(_config().toJson()).importStatus, isNull);
+  });
+
   test('unknown route yields an empty plan', () {
     expect(buildDayPlan(_config(), 999, monday).totalStops, 0);
     expect(buildDayPlan(_config(), null, monday).totalStops, 0);

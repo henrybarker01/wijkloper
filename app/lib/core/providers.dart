@@ -164,7 +164,14 @@ class ConfigNotifier extends Notifier<ConfigState> {
     if (!ref.mounted) return false;
     state = state.copyWith(loading: true);
     try {
-      final fresh = await api.fetchConfig(knownVersion: state.config?.version);
+      final fetched = await api.fetchConfig(knownVersion: state.config?.version);
+      var fresh = fetched.config;
+      // Same route as before, but the nightly import may have run since.
+      final status = fetched.importStatus;
+      if (fresh == null && status != null && state.config != null) {
+        final known = state.config!.importStatus;
+        if (known == null || !known.sameAs(status)) fresh = state.config!.withImportStatus(status);
+      }
       if (fresh != null) {
         await ref.read(localStoreProvider).writeConfig(fresh);
       }

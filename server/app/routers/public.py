@@ -16,11 +16,19 @@ router = APIRouter(prefix="/api", tags=["public"])
 
 @router.get("/health")
 def health(db: sqlite3.Connection = Depends(get_db)):
+    from ..importer import import_status
+
+    status = import_status(db)
+    attempt, applied = status["last_attempt"], status["last_applied"]
     return {
         "app": "wijkloper",
         "version": APP_VERSION,
         "family_name": get_setting(db, "family_name", "") or "",
         "server_time": now_iso(),
+        # Quick check that the nightly import is alive: last successful run,
+        # and whether the most recent attempt went through.
+        "last_import_at": applied["ran_at"] if applied else None,
+        "last_import_attempt_ok": attempt["ok"] if attempt else None,
     }
 
 

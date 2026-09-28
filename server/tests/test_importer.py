@@ -353,3 +353,22 @@ def test_every_run_is_recorded(db):
     assert len(history) == 2
     assert history[0]["summary"].startswith("dry run")
     assert all(row["source"] == "test" and row["district"] == "3772-013" for row in history)
+
+
+def test_failed_attempts_are_recorded_and_the_status_tells_them_apart(db):
+    from app.importer import apply_import, import_status, record_failure, recent_imports
+
+    assert import_status(db) == {"last_attempt": None, "last_applied": None}
+    apply_import(db, payload([1, 3]))
+    good = import_status(db)
+    assert good["last_applied"]["applied"] is True and good["last_attempt"] == good["last_applied"]
+
+    # The portal was down this morning: the attempt is on record, the last
+    # successful import is still the one from before.
+    record_failure(db, "test", "3772-013", "could not read the portal: HTTP 503")
+    latest = recent_imports(db)[0]
+    assert latest["ok"] == 0 and latest["applied"] == 0
+    assert latest["summary"] == "failed: could not read the portal: HTTP 503"
+    status = import_status(db)
+    assert status["last_attempt"]["ok"] is False and "503" in status["last_attempt"]["summary"]
+    assert status["last_applied"] == good["last_applied"]

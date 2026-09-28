@@ -444,6 +444,45 @@ def _record(db: sqlite3.Connection, report: Dict[str, Any], *, commit: bool) -> 
         db.commit()
 
 
+def record_failure(db: sqlite3.Connection, source: str, district: str, error: str) -> None:
+    """A run that never got as far as a usable list (portal down, credentials
+    missing, broken payload). Recorded so the family can see that last night
+    did not happen, instead of a silent gap in the log."""
+    db.execute(
+        "INSERT INTO imports(source, district, ran_at, applied, ok, summary, report_json) "
+        "VALUES (?,?,?,0,0,?,?)",
+        (
+            source,
+            district,
+            now_iso(),
+            "failed: " + str(error)[:160],
+            json.dumps({"ok": False, "applied": False, "error": str(error)}, ensure_ascii=False),
+        ),
+    )
+    db.commit()
+
+
+def import_status(db: sqlite3.Connection) -> Dict[str, Any]:
+    """What the phones show as "subscriber list last updated": the latest
+    attempt, which may have failed, and the latest run that really went through."""
+
+    def as_dict(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
+        if row is None:
+            return None
+        return {
+            "source": row["source"],
+            "ran_at": row["ran_at"],
+            "ok": bool(row["ok"]),
+            "applied": bool(row["applied"]),
+            "summary": row["summary"],
+        }
+
+    columns = "SELECT source, ran_at, ok, applied, summary FROM imports "
+    attempt = db.execute(columns + "ORDER BY ran_at DESC, id DESC LIMIT 1").fetchone()
+    applied = db.execute(columns + "WHERE ok=1 AND applied=1 ORDER BY ran_at DESC, id DESC LIMIT 1").fetchone()
+    return {"last_attempt": as_dict(attempt), "last_applied": as_dict(applied)}
+
+
 def recent_imports(db: sqlite3.Connection, limit: int = 20) -> List[Dict[str, Any]]:
     rows = db.execute(
         "SELECT id, source, district, ran_at, applied, ok, summary FROM imports "

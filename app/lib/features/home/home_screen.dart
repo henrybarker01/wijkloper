@@ -96,6 +96,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final routeId = config == null ? null : pickRouteId(config, kid);
     final skipped = ref.watch(skippedAddressIdsProvider);
     final plan = config == null ? null : buildDayPlan(config, routeId, _date, skip: skipped);
+    final importProblem = config?.importStatus?.problem(DateTime.now()) ?? ImportProblem.none;
 
     return Scaffold(
       appBar: AppBar(
@@ -136,6 +137,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             if (configState.offline && config != null) _OfflineBanner(lastSync: configState.lastSync),
             if (configState.unpaired) const _UnpairedBanner(),
+            if (importProblem != ImportProblem.none)
+              _ImportBanner(status: config!.importStatus!, problem: importProblem),
             if (config == null) _NoConfigCard(state: configState),
             if (config != null) ...[
               if (config.kids.isEmpty) const _SetupHintCard(),
@@ -230,6 +233,53 @@ class _OfflineBanner extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The nightly subscriber-list import missed a night or failed: the route on
+/// the phone may be out of date. Tapping opens the connection screen.
+class _ImportBanner extends StatelessWidget {
+  const _ImportBanner({required this.status, required this.problem});
+
+  final ImportStatus status;
+  final ImportProblem problem;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final text = switch (problem) {
+      ImportProblem.failed =>
+        'The last update from the portal (${timeAgo(status.lastAttempt!.ranAt)}) failed. '
+            'The route may be out of date.',
+      _ => status.lastApplied == null
+          ? 'The subscriber list has never been imported. The route may be out of date.'
+          : 'Subscriber list not updated since ${timeAgo(status.lastApplied!.ranAt)}. '
+              'The route may be out of date.',
+    };
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectionScreen())),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, size: 18, color: theme.colorScheme.onErrorContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onErrorContainer),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -29,7 +29,11 @@ def get_config(
     """Full configuration, or ``{"unchanged": true}`` when the phone is up to date."""
     version = int(get_setting(db, "config_version", "1") or 1)
     if known_version is not None and known_version == version:
-        return {"unchanged": True, "version": version}
+        # A nightly import that changed nothing does not bump the version, so
+        # the phones still get to hear that it ran.
+        from ..importer import import_status
+
+        return {"unchanged": True, "version": version, "import_status": import_status(db)}
     return build_config(db)
 
 

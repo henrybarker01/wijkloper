@@ -77,7 +77,11 @@ class ParentHome extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.route),
                   title: const Text('Route, streets & house numbers'),
-                  subtitle: Text('$streetCount ${streetCount == 1 ? 'street' : 'streets'} · $houseCount houses'),
+                  subtitle: Text([
+                    '$streetCount ${streetCount == 1 ? 'street' : 'streets'} · $houseCount houses',
+                    if (config?.importStatus?.lastApplied != null)
+                      'list updated ${timeAgo(config!.importStatus!.lastApplied!.ranAt)}',
+                  ].join(' · ')),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     if (config != null && config.routes.length == 1) {

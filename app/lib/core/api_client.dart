@@ -6,6 +6,14 @@ import 'package:http/http.dart' as http;
 
 import 'models.dart';
 
+class ConfigFetch {
+  const ConfigFetch({this.config, this.importStatus});
+
+  /// Null when the phone already has the current version.
+  final AppConfig? config;
+  final ImportStatus? importStatus;
+}
+
 class ApiException implements Exception {
   const ApiException(this.message, {this.statusCode, this.isNetwork = false});
 
@@ -229,13 +237,18 @@ class ApiClient {
   // --- device -------------------------------------------------------------------
 
   /// Returns the config, or null when the server says our [knownVersion] is current.
-  Future<AppConfig?> fetchConfig({int? knownVersion}) async {
+  /// The route if the server has a newer version than [knownVersion], plus
+  /// the import status, which the server sends either way.
+  Future<ConfigFetch> fetchConfig({int? knownVersion}) async {
     final json = await get(
       '/api/config',
       query: knownVersion == null ? null : {'known_version': '$knownVersion'},
     );
-    if (json['unchanged'] == true) return null;
-    return AppConfig.fromJson(json);
+    final status = json['import_status'] is Map
+        ? ImportStatus.fromJson(Map<String, dynamic>.from(json['import_status'] as Map))
+        : null;
+    if (json['unchanged'] == true) return ConfigFetch(importStatus: status);
+    return ConfigFetch(config: AppConfig.fromJson(json), importStatus: status);
   }
 
   Future<RunUploadResult> uploadRun(RunRecord run) async {
